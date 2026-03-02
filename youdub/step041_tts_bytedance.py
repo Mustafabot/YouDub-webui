@@ -13,23 +13,28 @@ import librosa
 import numpy as np
 import requests
 from loguru import logger
-from dotenv import load_dotenv
 from pyannote.audio import Model, Inference
 from scipy.spatial.distance import cosine
 
-load_dotenv()
-# 填写平台申请的appid, access_token以及cluster
-appid = os.getenv('BYTEDANCE_APPID')
-access_token = os.getenv('BYTEDANCE_ACCESS_TOKEN')
+from .config import get_config
+
+def get_bytedance_config():
+    return get_config('BYTEDANCE_APPID'), get_config('BYTEDANCE_ACCESS_TOKEN')
+
+appid, access_token = get_bytedance_config()
 
 host = "openspeech.bytedance.com"
 api_url = f"https://{host}/api/v1/tts"
 
-header = {"Authorization": f"Bearer;{access_token}"}
+def get_header():
+    return {"Authorization": f"Bearer;{get_config('BYTEDANCE_ACCESS_TOKEN')}"}
 
-request_json = {
+header = get_header()
+
+def get_request_json(voice_type='BV001_streaming'):
+    return {
     "app": {
-        "appid": appid,
+        "appid": get_config('BYTEDANCE_APPID'),
         "token": "access_token",
         "cluster": 'volcano_tts'
     },
@@ -54,10 +59,21 @@ request_json = {
     }
 }
 
-embedding_model = Model.from_pretrained(
-    "pyannote/embedding", use_auth_token=os.getenv('HF_TOKEN'))
-embedding_inference = Inference(
-    embedding_model, window="whole")
+embedding_model = None
+embedding_inference = None
+try:
+    hf_token = get_config('HF_TOKEN')
+    if hf_token:
+        embedding_model = Model.from_pretrained(
+            "pyannote/embedding", use_auth_token=hf_token)
+        embedding_inference = Inference(
+            embedding_model, window="whole")
+        logger.info("pyannote/embedding model loaded successfully")
+    else:
+        logger.warning("HF_TOKEN not set, embedding model will not be loaded")
+except Exception as e:
+    logger.warning(f"Failed to load pyannote/embedding model: {e}")
+    logger.warning("Speaker embedding functionality will be disabled")
 
 def generate_embedding(wav_path):
     embedding = embedding_inference(wav_path)
@@ -108,11 +124,8 @@ def tts(text, output_path, speaker_wav, voice_type=None):
         voice_type = speaker_to_voice_type[speaker]
     for retry in range(3):
         try:
-            global request_json
-            request_json["audio"]["voice_type"] = voice_type
-            request_json["request"]["text"] = text
-            request_json["request"]["reqid"] = str(uuid.uuid4())
-            resp = requests.post(api_url, json.dumps(request_json), headers=header, timeout=60)
+            request_json = get_request_json(voice_type)
+            resp = requests.post(api_url, json.dumps(request_json), headers=get_header(), timeout=60)
             # print(f"resp body: \n{resp.json()}")
             if "data" in resp.json():
                 data = resp.json()["data"]
@@ -130,6 +143,9 @@ def tts(text, output_path, speaker_wav, voice_type=None):
             logger.warning(e)
 
 def get_available_speakers():
+    if embedding_inference is None:
+        logger.warning("Embedding model not available, skipping speaker download")
+        return
     if not os.path.exists('voice_type'):
         os.makedirs('voice_type')
     voice_types = ['BV001_streaming', 'BV002_streaming', 'BV005_streaming', 'BV007_streaming', 'BV033_streaming', 'BV034_streaming', 'BV056_streaming', 'BV102_streaming', 'BV113_streaming', 'BV115_streaming', 'BV119_streaming', 'BV700_streaming', 'BV701_streaming']

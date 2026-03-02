@@ -1,6 +1,9 @@
 @echo off
 SETLOCAL
 
+:: Change to the script directory
+cd /d "%~dp0"
+
 :: Activate the virtual environment
 CALL venv\Scripts\activate
 

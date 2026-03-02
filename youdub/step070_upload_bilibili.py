@@ -4,15 +4,14 @@ import json
 import os
 from bilibili_toolman.bilisession.web import BiliSession
 from bilibili_toolman.bilisession.common.submission import Submission
-from dotenv import load_dotenv
 from loguru import logger
-# Load environment variables
-load_dotenv()
+
+from .config import get_config
 
 def bili_login():
 
-    SESSDATA = os.getenv('BILI_SESSDATA')
-    BILI_JCT = os.getenv('BILI_BILI_JCT')
+    SESSDATA = get_config('BILI_SESSDATA')
+    BILI_JCT = get_config('BILI_BILI_JCT')
     try:
         session = BiliSession(f'SESSDATA={SESSDATA};bili_jct={BILI_JCT}')
         logger.info(f"bilibili登陆成功。")

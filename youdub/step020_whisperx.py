@@ -3,13 +3,10 @@ import time
 import librosa
 import numpy as np
 import whisperx
-import os
 from loguru import logger
-import torch
-from dotenv import load_dotenv
 
 from .utils import save_wav
-load_dotenv()
+from .config import get_config
 
 whisper_model = None
 diarize_model = None
@@ -57,7 +54,7 @@ def load_diarize_model(device='auto'):
     if device == 'auto':
         device = 'cuda' if torch.cuda.is_available() else 'cpu'
     t_start = time.time()
-    diarize_model = whisperx.DiarizationPipeline(use_auth_token=os.getenv('HF_TOKEN'), device=device)
+    diarize_model = whisperx.DiarizationPipeline(use_auth_token=get_config('HF_TOKEN'), device=device)
     t_end = time.time()
     logger.info(f'Loaded diarization model in {t_end - t_start:.2f}s')
 

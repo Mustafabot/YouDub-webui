@@ -8,15 +8,52 @@ from youdub.step050_synthesize_video import synthesize_all_video_under_folder
 from youdub.step060_genrate_info import generate_all_info_under_folder
 from youdub.step070_upload_bilibili import upload_all_videos_under_folder
 from youdub.do_everything import do_everything
+from youdub.config import load_config, save_config, DEFAULT_CONFIG
 import os
 
 
+def save_settings(openai_api_key, openai_api_base, model_name, hf_token, hf_endpoint,
+                  bytedance_appid, bytedance_access_token, bili_sessdata, bili_bili_jct, bili_base64):
+    config = {
+        "OPENAI_API_KEY": openai_api_key,
+        "OPENAI_API_BASE": openai_api_base,
+        "MODEL_NAME": model_name,
+        "HF_TOKEN": hf_token,
+        "HF_ENDPOINT": hf_endpoint,
+        "BYTEDANCE_APPID": bytedance_appid,
+        "BYTEDANCE_ACCESS_TOKEN": bytedance_access_token,
+        "BILI_SESSDATA": bili_sessdata,
+        "BILI_BILI_JCT": bili_bili_jct,
+        "BILI_BASE64": bili_base64,
+    }
+    save_config(config)
+    return "配置已保存！重启应用后生效。"
+
+
+settings_interface = gr.Interface(
+    fn=save_settings,
+    inputs=[
+        gr.Textbox(label='OpenAI API Key', type='password', value=load_config().get('OPENAI_API_KEY', '')),
+        gr.Textbox(label='OpenAI API Base', value=load_config().get('OPENAI_API_BASE', 'https://api.openai.com/v1')),
+        gr.Dropdown(['gpt-3.5-turbo', 'gpt-4', 'gpt-4-turbo', '01ai/Yi-34B-Chat-4bits'], 
+                    label='Model Name', value=load_config().get('MODEL_NAME', 'gpt-3.5-turbo')),
+        gr.Textbox(label='HuggingFace Token', type='password', value=load_config().get('HF_TOKEN', '')),
+        gr.Textbox(label='HuggingFace Endpoint (可选，用于国内加速)', 
+                   value=load_config().get('HF_ENDPOINT', '')),
+        gr.Textbox(label='Bytedance App ID', value=load_config().get('BYTEDANCE_APPID', '')),
+        gr.Textbox(label='Bytedance Access Token', type='password', value=load_config().get('BYTEDANCE_ACCESS_TOKEN', '')),
+        gr.Textbox(label='BiliBili SESSDATA', type='password', value=load_config().get('BILI_SESSDATA', '')),
+        gr.Textbox(label='BiliBili bili_jct', type='password', value=load_config().get('BILI_BILI_JCT', '')),
+        gr.Textbox(label='BiliBili Cover Base64', value=load_config().get('BILI_BASE64', '')),
+    ],
+    outputs='text',
+)
 do_everything_interface = gr.Interface(
     fn=do_everything,
     inputs=[
-        gr.Textbox(label='Root Folder', value='videos'),  # Changed 'default' to 'value'
+        gr.Textbox(label='Root Folder', value='videos'),
         gr.Textbox(label='Video URL', placeholder='Video or Playlist or Channel URL',
-                   value='https://www.bilibili.com/list/1263732318'),  # Changed 'default' to 'value'
+                   value='https://www.bilibili.com/list/1263732318'),
         gr.Slider(minimum=1, maximum=500, step=1, label='Number of videos to download', value=20),
         gr.Radio(['4320p', '2160p', '1440p', '1080p', '720p', '480p', '360p', '240p', '144p'], label='Resolution', value='1080p'),
         gr.Radio(['htdemucs', 'htdemucs_ft', 'htdemucs_6s', 'hdemucs_mmi', 'mdx', 'mdx_extra', 'mdx_q', 'mdx_extra_q', 'SIG'], label='Demucs Model', value='htdemucs_ft'),
@@ -42,40 +79,37 @@ do_everything_interface = gr.Interface(
         gr.Checkbox(label='Auto Upload Video', value=True),
     ],
     outputs='text',
-    allow_flagging='never',
 )
     
 youtube_interface = gr.Interface(
     fn=download_from_url,
     inputs=[
         gr.Textbox(label='Video URL', placeholder='Video or Playlist or Channel URL',
-                   value='https://www.bilibili.com/list/1263732318'),  # Changed 'default' to 'value'
-        gr.Textbox(label='Output Folder', value='videos'),  # Changed 'default' to 'value'
+                   value='https://www.bilibili.com/list/1263732318'),
+        gr.Textbox(label='Output Folder', value='videos'),
         gr.Radio(['4320p', '2160p', '1440p', '1080p', '720p', '480p', '360p', '240p', '144p'], label='Resolution', value='1080p'),
         gr.Slider(minimum=1, maximum=100, step=1, label='Number of videos to download', value=5),
     ],
     outputs='text',
-    allow_flagging='never',
 )
 
 demucs_interface = gr.Interface(
     fn=separate_all_audio_under_folder,
     inputs = [
-        gr.Textbox(label='Folder', value='videos'),  # Changed 'default' to 'value'
+        gr.Textbox(label='Folder', value='videos'),
         gr.Radio(['htdemucs', 'htdemucs_ft', 'htdemucs_6s', 'hdemucs_mmi', 'mdx', 'mdx_extra', 'mdx_q', 'mdx_extra_q', 'SIG'], label='Model', value='htdemucs_ft'),
         gr.Radio(['auto', 'cuda', 'cpu'], label='Device', value='auto'),
         gr.Checkbox(label='Progress Bar in Console', value=True),
         gr.Slider(minimum=0, maximum=10, step=1, label='Number of shifts', value=5),
     ],
     outputs='text',
-    allow_flagging='never',
 )
 
 # transcribe_all_audio_under_folder(folder, model_name: str = 'large', download_root='models/ASR/whisper', device='auto', batch_size=32)
 whisper_inference = gr.Interface(
     fn = transcribe_all_audio_under_folder,
     inputs = [
-        gr.Textbox(label='Folder', value='videos'),  # Changed 'default' to 'value'
+        gr.Textbox(label='Folder', value='videos'),
         gr.Radio(['large', 'medium', 'small', 'base', 'tiny'], label='Model', value='large'),
         gr.Textbox(label='Download Root', value='models/ASR/whisper'),
         gr.Radio(['auto', 'cuda', 'cpu'], label='Device', value='auto'),
@@ -87,13 +121,12 @@ whisper_inference = gr.Interface(
                  label='Whisper Max Speakers', value=None),
     ],
     outputs='text',
-    allow_flagging='never',
 )
 
 translation_interface = gr.Interface(
     fn=translate_all_transcript_under_folder,
     inputs = [
-        gr.Textbox(label='Folder', value='videos'),  # Changed 'default' to 'value'
+        gr.Textbox(label='Folder', value='videos'),
         gr.Dropdown(['简体中文', '繁体中文', 'English', 'Deutsch', 'Français', 'русский'],
                     label='Target Language', value='简体中文'),
     ],
@@ -103,47 +136,43 @@ translation_interface = gr.Interface(
 tts_interafce = gr.Interface(
     fn=generate_all_wavs_under_folder,
     inputs = [
-        gr.Textbox(label='Folder', value='videos'),  # Changed 'default' to 'value'
+        gr.Textbox(label='Folder', value='videos'),
         gr.Checkbox(label='Force Bytedance', value=False),
     ],
     outputs='text',
-    allow_flagging='never',
 )
 syntehsize_video_interface = gr.Interface(
     fn=synthesize_all_video_under_folder,
     inputs = [
-        gr.Textbox(label='Folder', value='videos'),  # Changed 'default' to 'value'
+        gr.Textbox(label='Folder', value='videos'),
         gr.Checkbox(label='Subtitles', value=True),
         gr.Slider(minimum=0.5, maximum=2, step=0.05, label='Speed Up', value=1.05),
         gr.Slider(minimum=1, maximum=60, step=1, label='FPS', value=30),
         gr.Radio(['4320p', '2160p', '1440p', '1080p', '720p', '480p', '360p', '240p', '144p'], label='Resolution', value='1080p'),
     ],
     outputs='text',
-    allow_flagging='never',
 )
 
 genearte_info_interface = gr.Interface(
     fn = generate_all_info_under_folder,
     inputs = [
-        gr.Textbox(label='Folder', value='videos'),  # Changed 'default' to 'value'
+        gr.Textbox(label='Folder', value='videos'),
     ],
     outputs='text',
-    allow_flagging='never',
 )
 
 upload_bilibili_interface = gr.Interface(
     fn = upload_all_videos_under_folder,
     inputs = [
-        gr.Textbox(label='Folder', value='videos'),  # Changed 'default' to 'value'
+        gr.Textbox(label='Folder', value='videos'),
     ],
     outputs='text',
-    allow_flagging='never',
 )
 
 app = gr.TabbedInterface(
-    interface_list=[do_everything_interface,youtube_interface, demucs_interface,
+    interface_list=[settings_interface, do_everything_interface, youtube_interface, demucs_interface,
                     whisper_inference, translation_interface, tts_interafce, syntehsize_video_interface, upload_bilibili_interface],
-    tab_names=['全自动', '下载视频', '人声分离', '语音识别', '字幕翻译', '语音合成', '视频合成', '上传B站'],
+    tab_names=['设置', '全自动', '下载视频', '人声分离', '语音识别', '字幕翻译', '语音合成', '视频合成', '上传B站'],
     title='YouDub')
 if __name__ == '__main__':
     app.launch()

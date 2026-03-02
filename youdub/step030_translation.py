@@ -3,13 +3,12 @@ import json
 import os
 import re
 from openai import OpenAI
-from dotenv import load_dotenv
 import time
 from loguru import logger
 
-load_dotenv()
+from .config import get_config
 
-model_name = os.getenv('MODEL_NAME', 'gpt-3.5-turbo')
+model_name = get_config('MODEL_NAME', 'gpt-3.5-turbo')
 print(f'using model {model_name}')
 if model_name == "01ai/Yi-34B-Chat-4bits":
     extra_body = {
@@ -39,8 +38,8 @@ def ensure_transcript_length(transcript, max_length=4000):
 def summarize(info, transcript, target_language='简体中文'):
     client = OpenAI(
     # This is the default and can be omitted
-    base_url=os.getenv('OPENAI_API_BASE', 'https://api.openai.com/v1'),
-    api_key=os.getenv('OPENAI_API_KEY')
+    base_url=get_config('OPENAI_API_BASE', 'https://api.openai.com/v1'),
+    api_key=get_config('OPENAI_API_KEY')
 )
     transcript = ' '.join(line['text'] for line in transcript)
     transcript = ensure_transcript_length(transcript, max_length=2000)
@@ -252,9 +251,8 @@ def split_sentences(translation):
     
 def _translate(summary, transcript, target_language='简体中文'):
     client = OpenAI(
-        # This is the default and can be omitted
-        base_url=os.getenv('OPENAI_API_BASE', 'https://api.openai.com/v1'),
-        api_key=os.getenv('OPENAI_API_KEY')
+        base_url=get_config('OPENAI_API_BASE', 'https://api.openai.com/v1'),
+        api_key=get_config('OPENAI_API_KEY')
     )
     info = f'This is a video called "{summary["title"]}". {summary["summary"]}.'
     full_translation = []
@@ -295,10 +293,8 @@ def _translate(summary, transcript, target_language='简体中文'):
                 logger.error(e)
                 if e == 'Internal Server Error':
                     client = OpenAI(
-                        # This is the default and can be omitted
-                        base_url=os.getenv(
-                            'OPENAI_API_BASE', 'https://api.openai.com/v1'),
-                        api_key=os.getenv('OPENAI_API_KEY')
+                        base_url=get_config('OPENAI_API_BASE', 'https://api.openai.com/v1'),
+                        api_key=get_config('OPENAI_API_KEY')
                     )
                 # logger.warning('翻译失败')
                 time.sleep(1)
