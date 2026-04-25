@@ -9,3 +9,7 @@ python-dotenv
 openai
 audiostretchy
 bilibili_toolman
+Pillow
+
+# Optional dependencies (installed by setup_windows.bat, can be installed manually if needed):
+# TTS  - Coqui TTS library, install with: pip install TTS

@@ -10,15 +10,57 @@ from .config import get_config
 
 model_name = get_config('MODEL_NAME', 'gpt-3.5-turbo')
 print(f'using model {model_name}')
-if model_name == "01ai/Yi-34B-Chat-4bits":
+
+def get_api_params():
+    params = {}
+    
+    temperature = get_config('OPENAI_API_TEMPERATURE', 1.0)
+    if temperature:
+        try:
+            params['temperature'] = float(temperature)
+        except (ValueError, TypeError):
+            pass
+    
+    top_p = get_config('OPENAI_API_TOP_P', 1.0)
+    if top_p:
+        try:
+            params['top_p'] = float(top_p)
+        except (ValueError, TypeError):
+            pass
+    
+    max_tokens = get_config('OPENAI_API_MAX_TOKENS', '')
+    if max_tokens and str(max_tokens).strip():
+        try:
+            params['max_tokens'] = int(max_tokens)
+        except (ValueError, TypeError):
+            pass
+    
+    return params
+
+def build_extra_body():
     extra_body = {
         'repetition_penalty': 1.1,
-        'stop_token_ids': [7]
     }
-else:
-    extra_body = {
-        'repetition_penalty': 1.1,
-    }
+    
+    if model_name == "01ai/Yi-34B-Chat-4bits":
+        extra_body['stop_token_ids'] = [7]
+    
+    custom_extra = get_config('OPENAI_API_EXTRA_BODY', '')
+    if custom_extra and str(custom_extra).strip():
+        try:
+            import json
+            custom_dict = json.loads(custom_extra)
+            if isinstance(custom_dict, dict):
+                extra_body.update(custom_dict)
+                logger.info(f'使用自定义 extra_body: {custom_dict}')
+        except json.JSONDecodeError as e:
+            logger.warning(f'自定义 extra_body JSON 解析失败: {e}，使用默认配置')
+        except Exception as e:
+            logger.warning(f'处理自定义 extra_body 时出错: {e}')
+    
+    return extra_body
+
+extra_body = build_extra_body()
 def get_necessary_info(info: dict):
     return {
         'title': info['title'],
@@ -61,11 +103,13 @@ def summarize(info, transcript, target_language='简体中文'):
                 {'role': 'system', 'content': f'You are a expert in the field of this video. Please summarize the video in JSON format.\n```json\n{{"title": "the title of the video", "summary", "the summary of the video"}}\n```'},
                 {'role': 'user', 'content': full_description+retry_message},
             ]
+            api_params = get_api_params()
             response = client.chat.completions.create(
                 model=model_name,
                 messages=messages,
                 timeout=240,
-                extra_body=extra_body
+                extra_body=extra_body,
+                **api_params
             )
             summary = response.choices[0].message.content.replace('\n', '')
             if '视频标题' in summary:
@@ -99,11 +143,13 @@ def summarize(info, transcript, target_language='简体中文'):
     ]
     while True:
         try:
+            api_params = get_api_params()
             response = client.chat.completions.create(
                 model=model_name,
                 messages=messages,
                 timeout=240,
-                extra_body=extra_body
+                extra_body=extra_body,
+                **api_params
             )
             summary = response.choices[0].message.content.replace('\n', '')
             logger.info(summary)
@@ -275,11 +321,13 @@ def _translate(summary, transcript, target_language='简体中文'):
                                   'content': f'使用地道的中文Translate:"{text}"'}]
             
             try:
+                api_params = get_api_params()
                 response = client.chat.completions.create(
                     model=model_name,
                     messages=messages,
                     timeout=240,
-                    extra_body=extra_body
+                    extra_body=extra_body,
+                    **api_params
                 )
                 translation = response.choices[0].message.content.replace('\n', '')
                 logger.info(f'原文：{text}')

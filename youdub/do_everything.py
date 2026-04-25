@@ -2,7 +2,7 @@ import json
 import os
 import time
 from loguru import logger
-from .step000_video_downloader import get_info_list_from_url, download_single_video, get_target_folder
+from .step000_video_downloader import get_info_list_from_url, download_single_video, get_target_folder, process_local_video, get_info_list_from_local
 from .step010_demucs_vr import separate_all_audio_under_folder, init_demucs
 from .step020_whisperx import transcribe_all_audio_under_folder, init_whisperx
 from .step030_translation import translate_all_transcript_under_folder
@@ -27,7 +27,13 @@ def process_video(info, root_folder, resolution, demucs_model, device, shifts, w
     
     for retry in range(max_retries):
         try:
-            folder = get_target_folder(info, root_folder)
+            is_local = info.get('is_local', False)
+            
+            if is_local:
+                folder = process_local_video(info, root_folder)
+            else:
+                folder = get_target_folder(info, root_folder)
+            
             if folder is None:
                 logger.warning(f'Failed to get target folder for video {info["title"]}')
                 return False
@@ -39,10 +45,12 @@ def process_video(info, root_folder, resolution, demucs_model, device, shifts, w
                     logger.info(f'Video already uploaded in {folder}')
                     return True
                 
-            folder = download_single_video(info, root_folder, resolution)
-            if folder is None:
-                logger.warning(f'Failed to download video {info["title"]}')
-                return True
+            if not is_local:
+                folder = download_single_video(info, root_folder, resolution)
+                if folder is None:
+                    logger.warning(f'Failed to download video {info["title"]}')
+                    return True
+            
             # if os.path.exists(folder, 'video.mp4') and os.path.exists(folder, 'video.txt') and os.path.exists(folder, 'video.png'):
             # if os.path.exists(os.path.join(folder, 'video.mp4')) and os.path.exists(os.path.join(folder, 'video.txt')) and os.path.exists(os.path.join(folder, 'video.png')):
             # if auto_upload_video and os.path.exists(os.path.join(folder, 'bilibili.json')):
@@ -74,12 +82,19 @@ def process_video(info, root_folder, resolution, demucs_model, device, shifts, w
     return False
 
 
-def do_everything(root_folder, url, num_videos=5, resolution='1080p', demucs_model='htdemucs_ft', device='auto', shifts=5, whisper_model='large', whisper_download_root='models/ASR/whisper', whisper_batch_size=32, whisper_diarization=True, whisper_min_speakers=None, whisper_max_speakers=None, translation_target_language='简体中文', force_bytedance=False, subtitles=True, speed_up=1.05, fps=30, target_resolution='1080p', max_workers=3, max_retries=5, auto_upload_video=True):
+def do_everything(root_folder, url=None, local_video_paths=None, num_videos=5, resolution='1080p', demucs_model='htdemucs_ft', device='auto', shifts=5, whisper_model='large', whisper_download_root='models/ASR/whisper', whisper_batch_size=32, whisper_diarization=True, whisper_min_speakers=None, whisper_max_speakers=None, translation_target_language='简体中文', force_bytedance=True, subtitles=True, speed_up=1.05, fps=30, target_resolution='1080p', max_workers=1, max_retries=3, auto_upload_video=False):
     success_list = []
     fail_list = []
 
-    url = url.replace(' ', '').replace('，', '\n').replace(',', '\n')
-    urls = [_ for _ in url.split('\n') if _]
+    video_info_iterator = None
+    if local_video_paths is not None and len(local_video_paths) > 0:
+        video_info_iterator = get_info_list_from_local(local_video_paths, root_folder)
+    elif url is not None and url.strip():
+        url = url.replace(' ', '').replace('，', '\n').replace(',', '\n')
+        urls = [_ for _ in url.split('\n') if _]
+        video_info_iterator = get_info_list_from_url(urls, num_videos)
+    else:
+        return 'Error: Please provide either video URL(s) or local video file(s)'
     
     # 使用线程池执行任务
     with ThreadPoolExecutor() as executor:
@@ -106,7 +121,7 @@ def do_everything(root_folder, url, num_videos=5, resolution='1080p', demucs_mod
     #             success_list.append(info)
     #         else:
     #             fail_list.append(info)
-    for info in get_info_list_from_url(urls, num_videos):
+    for info in video_info_iterator:
         success = process_video(info, root_folder, resolution, demucs_model, device, shifts, whisper_model, whisper_download_root, whisper_batch_size,
                                 whisper_diarization, whisper_min_speakers, whisper_max_speakers, translation_target_language, force_bytedance, subtitles, speed_up, fps, target_resolution, max_retries, auto_upload_video)
         if success:

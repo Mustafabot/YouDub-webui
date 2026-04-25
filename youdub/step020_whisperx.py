@@ -1,7 +1,9 @@
 import json
+import os
 import time
 import librosa
 import numpy as np
+import torch
 import whisperx
 from loguru import logger
 
