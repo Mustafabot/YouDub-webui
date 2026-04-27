@@ -7,6 +7,8 @@ from pathlib import Path
 from loguru import logger
 import yt_dlp
 
+from .config import ensure_ffmpeg_available, get_ffmpeg_path
+
 
 def sanitize_title(title):
     # Only keep numbers, letters, Chinese characters, and spaces
@@ -29,6 +31,17 @@ def get_target_folder(info, folder_path):
     return output_folder
 
 def download_single_video(info, folder_path, resolution='1080p'):
+    ffmpeg_available, ffmpeg_msg = ensure_ffmpeg_available(auto_download=True)
+    if not ffmpeg_available:
+        raise RuntimeError(
+            f'FFmpeg 不可用，无法进行视频下载和合并。{ffmpeg_msg}\n'
+            f'请按以下方式之一安装 FFmpeg：\n'
+            f'1. 运行 python scripts/download_ffmpeg.py 自动下载\n'
+            f'2. Windows: 从 https://ffmpeg.org/download.html 下载，解压后将 bin 目录添加到系统 PATH，或在配置中设置 FFMPEG_PATH\n'
+            f'3. macOS: brew install ffmpeg\n'
+            f'4. Linux: sudo apt install ffmpeg'
+        )
+    
     sanitized_title = sanitize_title(info['title'])
     sanitized_uploader = sanitize_title(info.get('uploader', 'Unknown'))
     upload_date = info.get('upload_date', 'Unknown')
@@ -41,17 +54,26 @@ def download_single_video(info, folder_path, resolution='1080p'):
         return output_folder
     
     resolution = resolution.replace('p', '')
+    ffmpeg_path = get_ffmpeg_path()
     ydl_opts = {
-        # 'res': '1080',
         'format': f'bestvideo[ext=mp4][height<={resolution}]+bestaudio[ext=m4a]/best[ext=mp4]/best',
         'writeinfojson': True,
         'writethumbnail': True,
         'outtmpl': os.path.join(folder_path, sanitized_uploader, f'{upload_date} {sanitized_title}', 'download'),
-        'ignoreerrors': True
+        'ignoreerrors': True,
+        'merge_output_format': 'mp4',
+        'ffmpeg_location': ffmpeg_path,
     }
 
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         ydl.download([info['webpage_url']])
+    
+    if not os.path.exists(os.path.join(output_folder, 'download.mp4')):
+        raise FileNotFoundError(
+            f'下载完成但未找到 download.mp4，请检查 ffmpeg 是否已安装且可用。'
+            f'目录内容: {os.listdir(output_folder) if os.path.exists(output_folder) else "目录不存在"}'
+        )
+    
     logger.info(f'Video downloaded in {output_folder}')
     return output_folder
 

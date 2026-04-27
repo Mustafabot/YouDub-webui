@@ -1,0 +1,7 @@
+# 排除 FFmpeg 二进制文件
+ffmpeg
+ffmpeg.exe
+
+# 保留版本信息文件
+!FFMPEG_VERSION
+!.gitignore

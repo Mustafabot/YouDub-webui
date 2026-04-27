@@ -1,3 +1,9 @@
+import os
+os.environ["GRADIO_SERVER_PORT"] = "19876"
+
+import warnings
+warnings.filterwarnings("ignore", category=UserWarning, module="pyannote")
+
 import gradio as gr
 from youdub.step000_video_downloader import download_from_url, import_local_video
 from youdub.step010_demucs_vr import separate_all_audio_under_folder
@@ -9,7 +15,135 @@ from youdub.step060_genrate_info import generate_all_info_under_folder
 from youdub.step070_upload_bilibili import upload_all_videos_under_folder
 from youdub.do_everything import do_everything
 from youdub.config import load_config, save_config, get_config_status, validate_config, DEFAULT_CONFIG, check_network, get_offline_capabilities
-import os
+from youdub.module_registry import get_module, get_module_dependencies, get_execution_order, resolve_dependencies, MODULES, get_module_input_files
+from youdub.module_executor import get_module_with_info
+import shutil
+import json
+
+
+# 每个输入文件对应的支持格式和验证规则
+INPUT_FILE_FORMATS = {
+    "download.mp4": {
+        "extensions": [".mp4", ".avi", ".mkv", ".mov", ".flv"],
+        "description": "视频文件"
+    },
+    "audio_vocals.wav": {
+        "extensions": [".wav", ".mp3", ".flac", ".m4a", ".aac"],
+        "description": "人声音频文件"
+    },
+    "audio_instruments.wav": {
+        "extensions": [".wav", ".mp3", ".flac", ".m4a", ".aac"],
+        "description": "伴奏音频文件"
+    },
+    "transcript.json": {
+        "extensions": [".json"],
+        "description": "识别结果文件"
+    },
+    "download.info.json": {
+        "extensions": [".json"],
+        "description": "视频信息文件"
+    },
+    "translation.json": {
+        "extensions": [".json"],
+        "description": "翻译结果文件"
+    },
+    "summary.json": {
+        "extensions": [".json"],
+        "description": "摘要文件"
+    },
+    "audio_combined.wav": {
+        "extensions": [".wav", ".mp3", ".flac", ".m4a", ".aac"],
+        "description": "合成音频文件"
+    },
+    "audio_tts.wav": {
+        "extensions": [".wav", ".mp3", ".flac", ".m4a", ".aac"],
+        "description": "TTS输出文件"
+    },
+    "video.mp4": {
+        "extensions": [".mp4", ".avi", ".mkv", ".mov"],
+        "description": "合成视频文件"
+    },
+    "video.txt": {
+        "extensions": [".txt"],
+        "description": "视频标题描述文件"
+    },
+    "video.png": {
+        "extensions": [".png", ".jpg", ".jpeg"],
+        "description": "视频封面文件"
+    }
+}
+
+
+def validate_file_format(file_path, expected_filename):
+    """验证文件格式是否符合要求"""
+    if file_path is None or not os.path.exists(file_path):
+        return False, "文件不存在"
+    
+    file_ext = os.path.splitext(file_path)[1].lower()
+    format_info = INPUT_FILE_FORMATS.get(expected_filename)
+    
+    if format_info is None:
+        return True, "无格式验证规则"
+    
+    if file_ext not in format_info["extensions"]:
+        return False, f"文件格式不符合要求。支持的格式：{', '.join(format_info['extensions'])}"
+    
+    return True, f"文件格式正确（{format_info['description']}）"
+
+
+def copy_selected_file_to_folder(src_file, dest_folder, target_filename):
+    """将用户选择的文件复制到目标文件夹"""
+    if src_file is None or not os.path.exists(src_file):
+        return False, "源文件不存在"
+    
+    if not os.path.exists(dest_folder):
+        os.makedirs(dest_folder, exist_ok=True)
+    
+    dest_path = os.path.join(dest_folder, target_filename)
+    
+    try:
+        shutil.copy2(src_file, dest_path)
+        return True, f"文件已复制到：{dest_path}"
+    except Exception as e:
+        return False, f"复制文件失败：{str(e)}"
+
+
+def get_file_label(filename):
+    """获取文件的显示标签"""
+    format_info = INPUT_FILE_FORMATS.get(filename)
+    if format_info:
+        return f"{filename} ({format_info['description']})"
+    return filename
+
+
+def create_selected_files_dict():
+    """创建初始的已选文件字典"""
+    return {filename: None for filename in INPUT_FILE_FORMATS.keys()}
+
+
+def update_file_selection(selected_files, filename, filepath):
+    """更新文件选择状态"""
+    if selected_files is None:
+        selected_files = create_selected_files_dict()
+    selected_files[filename] = filepath
+    return selected_files
+
+
+def format_selected_files_status(selected_files):
+    """格式化显示文件选择状态"""
+    if selected_files is None:
+        selected_files = create_selected_files_dict()
+    
+    lines = ["文件选择状态："]
+    for filename, filepath in selected_files.items():
+        if filepath:
+            status = f"✅ 已选择：{os.path.basename(filepath)}"
+        else:
+            status = "❌ 未选择"
+        lines.append(f"  {get_file_label(filename)}: {status}")
+    
+    return "\n".join(lines)
+
 
 
 def save_settings(openai_api_key, openai_api_base, model_name, temperature, top_p, max_tokens, extra_body,
@@ -111,7 +245,7 @@ def _classify_error(e):
 
 def do_everything_wrapper(input_mode, url, local_files, root_folder, num_videos, resolution, translation_target_language, subtitles, auto_upload_video,
                           demucs_model, demucs_device, shifts, whisper_model, whisper_batch_size, whisper_diarization,
-                          speed_up, fps, max_workers, max_retries, force_bytedance):
+                          speed_up, fps, max_workers, max_retries, force_bytedance, selected_modules, skip_completed, use_module_selection, selected_files):
     local_video_paths = None
     if input_mode == '本地文件':
         if local_files is None or len(local_files) == 0:
@@ -142,6 +276,11 @@ def do_everything_wrapper(input_mode, url, local_files, root_folder, num_videos,
             ["翻译功能需要 OpenAI API Key 才能运行", "API Key 未在设置页面中配置"],
             ["前往设置页面填写 OpenAI API Key", "获取 API Key：https://platform.openai.com/api-keys"]
         )
+    
+    modules_param = None
+    if use_module_selection and selected_modules and len(selected_modules) > 0:
+        modules_param = selected_modules
+    
     try:
         result = do_everything(
             root_folder=root_folder,
@@ -167,6 +306,9 @@ def do_everything_wrapper(input_mode, url, local_files, root_folder, num_videos,
             max_workers=int(max_workers),
             max_retries=int(max_retries),
             auto_upload_video=auto_upload_video,
+            selected_modules=modules_param,
+            skip_completed=skip_completed,
+            selected_files=selected_files
         )
         output = f"✅ {result}" if result and not str(result).startswith("❌") else result
         if offline_warnings:
@@ -248,6 +390,31 @@ _cfg = load_config()
 
 RESOLUTION_CHOICES = ['1080p', '720p', '480p']
 
+MODULES_INFO = get_module_with_info()
+MODULE_CHOICES = [(m["name"], m["id"]) for m in MODULES_INFO]
+DEFAULT_MODULES = [m["id"] for m in MODULES_INFO]
+
+
+def format_execution_order(selected_modules):
+    """格式化显示模块执行顺序"""
+    if not selected_modules or len(selected_modules) == 0:
+        return "未选择任何模块"
+    
+    try:
+        ordered = resolve_dependencies(selected_modules)
+        lines = ["模块执行顺序："]
+        for i, mid in enumerate(ordered, 1):
+            module = get_module(mid)
+            if module:
+                input_info = ""
+                if module.get("input_files"):
+                    input_info = f"（需要: {', '.join(module['input_files'])}）"
+                lines.append(f"  {i}. {module['name']}{input_info}")
+        return "\n".join(lines)
+    except:
+        return "模块选择无效"
+
+
 def import_local_videos_wrapper(local_files, folder_path, title=None, uploader=None, upload_date=None):
     if local_files is None or len(local_files) == 0:
         return _format_error(
@@ -274,6 +441,7 @@ def import_local_videos_wrapper(local_files, folder_path, title=None, uploader=N
             failed_count += 1
             results.append(f"❌ {os.path.basename(file_path)} -> 导入失败")
     return "\n".join(results) + f"\n\n成功: {success_count}\n失败: {failed_count}"
+
 
 translation_interface = gr.Interface(
     fn=translate_all_transcript_under_folder,
@@ -348,8 +516,7 @@ with gr.Blocks(title='YouDub') as app:
                     value=_cfg.get('OPENAI_API_MAX_TOKENS', ''),
                     info='最大输出 Token 数，留空表示不限制')
                 extra_body = gr.Code(label='Extra Body (JSON 格式)', language='json',
-                    value=_cfg.get('OPENAI_API_EXTRA_BODY', ''),
-                    info='额外请求参数，JSON 格式，例如：{"repetition_penalty": 1.1, "stop_token_ids": [7]}')
+                    value=_cfg.get('OPENAI_API_EXTRA_BODY', ''))
                 hf_token = gr.Textbox(label='HuggingFace Token *', type='password',
                     value=_cfg.get('HF_TOKEN', ''),
                     info='用于说话者分离功能，获取方式：https://huggingface.co/settings/tokens')
@@ -381,15 +548,14 @@ with gr.Blocks(title='YouDub') as app:
                 outputs=[save_result, status_display]
             )
         with gr.Tab('全自动'):
-            gr.Markdown("一键完成从视频下载到配音合成的全流程，只需填写基本设置即可开始")
+            gr.Markdown("一键完成从视频下载到配音合成的全流程，支持选择性执行特定模块")
             de_input_mode = gr.Radio(['URL 下载', '本地文件'], label='输入模式', value='URL 下载',
                                      info='选择从网络下载视频或使用本地视频文件')
             de_url = gr.Textbox(label='Video URL', placeholder='Video or Playlist or Channel URL',
                         value='https://www.bilibili.com/list/1263732318',
                         info='支持视频、播放列表或频道链接', visible=True)
             de_local_files = gr.File(label='本地视频文件', file_count='multiple',
-                                    type='filepath', visible=False,
-                                    info='选择一个或多个视频文件（支持 mp4, avi, mkv, mov 等格式）')
+                                    type='filepath', visible=False)
             de_root_folder = gr.Textbox(label='Root Folder', value='videos',
                          info='视频文件的根目录')
             de_num_videos = gr.Slider(minimum=1, maximum=100, step=1, label='Number of videos to download', value=5,
@@ -403,6 +569,116 @@ with gr.Blocks(title='YouDub') as app:
                        info='是否在合成视频中添加字幕')
             de_auto_upload = gr.Checkbox(label='Auto Upload Video', value=False,
                          info='自动上传到B站（建议先确认效果再开启）')
+            
+            with gr.Accordion("模块选择", open=True):
+                gr.Markdown("选择要执行的处理模块。取消勾选「启用模块选择」则执行完整流程。注意：请确保所选模块的输入文件已存在，缺失输入文件的模块将被跳过。")
+                de_use_module_selection = gr.Checkbox(label='启用模块选择', value=False,
+                    info='开启后可选择性执行特定模块（可单选/多选），关闭则执行完整流程')
+                de_selected_modules = gr.CheckboxGroup(
+                    choices=MODULE_CHOICES,
+                    value=DEFAULT_MODULES,
+                    label='选择要执行的模块',
+                    info='仅执行选中的模块，不会自动添加其他模块。请确保输入文件已存在。'
+                )
+                de_skip_completed = gr.Checkbox(label='跳过已完成步骤', value=True,
+                    info='检测到模块输出文件已存在时跳过执行')
+                de_execution_order = gr.Textbox(label='执行顺序预览', value=format_execution_order(DEFAULT_MODULES),
+                    interactive=False, lines=10)
+                
+                with gr.Row():
+                    select_all_btn = gr.Button("全选", size="sm")
+                    deselect_all_btn = gr.Button("全不选", size="sm")
+                
+                def select_all_modules():
+                    return DEFAULT_MODULES, format_execution_order(DEFAULT_MODULES)
+                
+                def deselect_all_modules():
+                    return [], format_execution_order([])
+                
+                select_all_btn.click(
+                    fn=select_all_modules,
+                    outputs=[de_selected_modules, de_execution_order]
+                )
+                deselect_all_btn.click(
+                    fn=deselect_all_modules,
+                    outputs=[de_selected_modules, de_execution_order]
+                )
+                
+                de_selected_modules.change(
+                    fn=format_execution_order,
+                    inputs=[de_selected_modules],
+                    outputs=[de_execution_order]
+                )
+            
+            with gr.Accordion("手动选择输入文件", open=False):
+                gr.Markdown("为各模块手动选择输入文件。选择的文件将在执行时自动复制到处理文件夹。")
+                
+                de_selected_files = gr.State(value=create_selected_files_dict())
+                de_selected_files_status = gr.Textbox(label="文件选择状态", value=format_selected_files_status(None),
+                    interactive=False, lines=15)
+                
+                # 按模块分组显示文件选择器
+                file_inputs = {}
+                file_statuses = {}
+                for module_id, module_info in MODULES.items():
+                    if module_info.get("input_files"):
+                        with gr.Accordion(f"{module_info['name']} - 输入文件", open=False):
+                            for input_file in module_info["input_files"]:
+                                format_info = INPUT_FILE_FORMATS.get(input_file, {})
+                                file_label = get_file_label(input_file)
+                                with gr.Row():
+                                    file_inputs[input_file] = gr.File(
+                                        label=file_label,
+                                        file_count="single",
+                                        type="filepath"
+                                    )
+                                    file_statuses[input_file] = gr.Textbox(
+                                        label=f"{input_file} - 验证状态",
+                                        value="未选择文件",
+                                        interactive=False,
+                                        scale=2
+                                    )
+                
+                # 为每个文件选择器设置回调
+                for filename, file_input in file_inputs.items():
+                    def create_file_callback(fname):
+                        def callback(filepath, selected_files=None):
+                            if selected_files is None:
+                                selected_files = create_selected_files_dict()
+                            
+                            if filepath:
+                                is_valid, msg = validate_file_format(filepath, fname)
+                                if is_valid:
+                                    selected_files[fname] = filepath
+                                    status_msg = f"✅ {msg}"
+                                else:
+                                    selected_files[fname] = None
+                                    status_msg = f"❌ {msg}"
+                            else:
+                                selected_files[fname] = None
+                                status_msg = "未选择文件"
+                            
+                            return selected_files, status_msg, format_selected_files_status(selected_files)
+                        return callback
+                    
+                    file_input.change(
+                        fn=create_file_callback(filename),
+                        inputs=[file_input, de_selected_files],
+                        outputs=[de_selected_files, file_statuses[filename], de_selected_files_status]
+                    )
+                
+                with gr.Row():
+                    clear_files_btn = gr.Button("清除所有文件选择", size="sm")
+                
+                def clear_file_selections():
+                    empty_files = create_selected_files_dict()
+                    return [empty_files, format_selected_files_status(empty_files)] + [None] * len(file_inputs)
+                
+                clear_files_btn.click(
+                    fn=clear_file_selections,
+                    outputs=[de_selected_files, de_selected_files_status] + list(file_inputs.values())
+                )
+            
             with gr.Accordion("高级设置", open=False):
                 de_demucs_model = gr.Radio(['htdemucs', 'htdemucs_ft', 'htdemucs_6s', 'hdemucs_mmi', 'mdx', 'mdx_extra', 'mdx_q', 'mdx_extra_q', 'SIG'],
                             label='Demucs Model', value='htdemucs_ft',
@@ -447,7 +723,8 @@ with gr.Blocks(title='YouDub') as app:
                 inputs=[de_input_mode, de_url, de_local_files, de_root_folder, de_num_videos, de_resolution, de_translation_target_language,
                         de_subtitles, de_auto_upload, de_demucs_model, de_demucs_device, de_shifts,
                         de_whisper_model, de_whisper_batch_size, de_whisper_diarization,
-                        de_speed_up, de_fps, de_max_workers, de_max_retries, de_force_bytedance],
+                        de_speed_up, de_fps, de_max_workers, de_max_retries, de_force_bytedance,
+                        de_selected_modules, de_skip_completed, de_use_module_selection, de_selected_files],
                 outputs=de_output
             )
         with gr.Tab('下载视频'):
@@ -472,8 +749,7 @@ with gr.Blocks(title='YouDub') as app:
                     gr.Markdown("导入本地视频文件到工作目录，以便后续处理")
                     with gr.Column():
                         local_files = gr.File(label='本地视频文件', file_count='multiple',
-                                             type='filepath',
-                                             info='选择一个或多个视频文件（支持 mp4, avi, mkv, mov 等格式）')
+                                             type='filepath')
                         local_folder = gr.Textbox(label='Output Folder', value='videos',
                                                  info='视频文件将被复制到此文件夹的子目录中')
                         with gr.Accordion("可选元数据（留空则自动生成）", open=False):
@@ -553,4 +829,4 @@ with gr.Blocks(title='YouDub') as app:
             upload_bilibili_interface.render()
 
 if __name__ == '__main__':
-    app.launch()
+    app.launch(server_port=19876)

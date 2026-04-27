@@ -92,7 +92,7 @@ def transcribe_audio(folder, model_name: str = 'large', download_root='models/AS
     
     wav_path = os.path.join(folder, 'audio_vocals.wav')
     if not os.path.exists(wav_path):
-        return False
+        raise FileNotFoundError(f'音频文件不存在: {wav_path}，请确认音频分离步骤已正确执行')
     
     logger.info(f'Transcribing {wav_path}')
     if device == 'auto':
@@ -145,10 +145,21 @@ def generate_speaker_audio(folder, transcript):
             
 
 def transcribe_all_audio_under_folder(folder, model_name: str = 'large', download_root='models/ASR/whisper', device='auto', batch_size=32, diarization=True, min_speakers=None, max_speakers=None):
+    found_video_dir = False
     for root, dirs, files in os.walk(folder):
-        if 'audio_vocals.wav' in files and 'transcript.json' not in files:
-            transcribe_audio(root, model_name,
-                             download_root, device, batch_size, diarization, min_speakers, max_speakers)
+        if 'download.mp4' not in files and 'audio.wav' not in files and 'audio_vocals.wav' not in files and 'transcript.json' not in files:
+            continue
+        found_video_dir = True
+        if 'audio_vocals.wav' not in files:
+            raise FileNotFoundError(
+                f'发现视频目录 {root} 但缺少 audio_vocals.wav，请确认音频分离步骤已正确执行。目录内容: {files}'
+            )
+        if 'transcript.json' in files:
+            continue
+        transcribe_audio(root, model_name,
+                         download_root, device, batch_size, diarization, min_speakers, max_speakers)
+    if not found_video_dir:
+        raise FileNotFoundError(f'在 {folder} 下未找到任何视频处理目录')
     return f'Transcribed all audio under {folder}'
 
 if __name__ == '__main__':

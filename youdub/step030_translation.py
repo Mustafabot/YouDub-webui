@@ -360,13 +360,16 @@ def translate(folder, target_language='简体中文'):
     
     info_path = os.path.join(folder, 'download.info.json')
     if not os.path.exists(info_path):
-        return False
+        raise FileNotFoundError(f'元数据文件不存在: {info_path}，请确认下载步骤已正确执行')
+    
+    transcript_path = os.path.join(folder, 'transcript.json')
+    if not os.path.exists(transcript_path):
+        raise FileNotFoundError(f'转录文件不存在: {transcript_path}，请确认语音识别步骤已正确执行')
     # info_path = r'videos\Lex Clips\20231222 Jeff Bezos on fear of death ｜ Lex Fridman Podcast Clips\download.info.json'
     with open(info_path, 'r', encoding='utf-8') as f:
         info = json.load(f)
     info = get_necessary_info(info)
     
-    transcript_path = os.path.join(folder, 'transcript.json')
     with open(transcript_path, 'r', encoding='utf-8') as f:
         transcript = json.load(f)
     
@@ -391,9 +394,20 @@ def translate(folder, target_language='简体中文'):
     return True
 
 def translate_all_transcript_under_folder(folder, target_language):
+    found_video_dir = False
     for root, dirs, files in os.walk(folder):
-        if 'transcript.json' in files and 'translation.json' not in files:
-            translate(root, target_language)
+        if 'download.info.json' not in files and 'transcript.json' not in files and 'translation.json' not in files:
+            continue
+        found_video_dir = True
+        if 'transcript.json' not in files:
+            raise FileNotFoundError(
+                f'发现视频目录 {root} 但缺少 transcript.json，请确认语音识别步骤已正确执行。目录内容: {files}'
+            )
+        if 'translation.json' in files:
+            continue
+        translate(root, target_language)
+    if not found_video_dir:
+        raise FileNotFoundError(f'在 {folder} 下未找到任何视频处理目录')
     return f'Translated all videos under {folder}'
 
 if __name__ == '__main__':

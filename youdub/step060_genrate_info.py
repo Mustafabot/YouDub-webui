@@ -40,7 +40,10 @@ def resize_thumbnail(folder, size=(1280, 960)):
         return new_img_path
 
 def generate_summary_txt(folder):
-    with open(os.path.join(folder, 'summary.json'), 'r', encoding='utf-8') as f:
+    summary_path = os.path.join(folder, 'summary.json')
+    if not os.path.exists(summary_path):
+        raise FileNotFoundError(f'摘要文件不存在: {summary_path}，请确认翻译步骤已正确执行')
+    with open(summary_path, 'r', encoding='utf-8') as f:
         summary = json.load(f)
     title = f'{summary["title"]} - {summary["author"]}'
     summary = summary['summary']
@@ -53,9 +56,20 @@ def generate_info(folder):
     resize_thumbnail(folder)
     
 def generate_all_info_under_folder(root_folder):
+    found_video_dir = False
     for root, dirs, files in os.walk(root_folder):
-        if 'download.info.json' in files:
-            generate_info(root)
+        if 'download.info.json' not in files and 'video.txt' not in files:
+            continue
+        found_video_dir = True
+        if 'download.info.json' not in files:
+            raise FileNotFoundError(
+                f'发现视频目录 {root} 但缺少 download.info.json，请确认下载步骤已正确执行。目录内容: {files}'
+            )
+        if 'video.txt' in files and 'video.png' in files:
+            continue
+        generate_info(root)
+    if not found_video_dir:
+        raise FileNotFoundError(f'在 {root_folder} 下未找到任何视频处理目录')
     return f'Generated all info under {root_folder}'
 if __name__ == '__main__':
     generate_all_info_under_folder('videos')

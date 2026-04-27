@@ -34,6 +34,17 @@ def adjust_audio_length(wav_path, desired_length, sample_rate = 24000, min_speed
 
 def generate_wavs(folder, force_bytedance=False):
     transcript_path = os.path.join(folder, 'translation.json')
+    if not os.path.exists(transcript_path):
+        raise FileNotFoundError(f'翻译文件不存在: {transcript_path}，请确认翻译步骤已正确执行')
+    
+    audio_vocals_path = os.path.join(folder, 'audio_vocals.wav')
+    if not os.path.exists(audio_vocals_path):
+        raise FileNotFoundError(f'人声音频不存在: {audio_vocals_path}，请确认音频分离步骤已正确执行')
+    
+    audio_instruments_path = os.path.join(folder, 'audio_instruments.wav')
+    if not os.path.exists(audio_instruments_path):
+        raise FileNotFoundError(f'伴奏音频不存在: {audio_instruments_path}，请确认音频分离步骤已正确执行')
+    
     output_folder = os.path.join(folder, 'wavs')
     if not os.path.exists(output_folder):
         os.makedirs(output_folder)
@@ -100,9 +111,20 @@ def generate_wavs(folder, force_bytedance=False):
         
 
 def generate_all_wavs_under_folder(root_folder, force_bytedance=False):
+    found_video_dir = False
     for root, dirs, files in os.walk(root_folder):
-        if 'translation.json' in files and 'audio_combined.wav' not in files:
-            generate_wavs(root, force_bytedance)
+        if 'translation.json' not in files and 'audio_combined.wav' not in files:
+            continue
+        found_video_dir = True
+        if 'translation.json' not in files:
+            raise FileNotFoundError(
+                f'发现视频目录 {root} 但缺少 translation.json，请确认翻译步骤已正确执行。目录内容: {files}'
+            )
+        if 'audio_combined.wav' in files:
+            continue
+        generate_wavs(root, force_bytedance)
+    if not found_video_dir:
+        raise FileNotFoundError(f'在 {root_folder} 下未找到任何视频处理目录')
     return f'Generated all wavs under {root_folder}'
 
 if __name__ == '__main__':

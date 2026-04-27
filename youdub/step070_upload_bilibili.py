@@ -32,6 +32,15 @@ def upload_video(folder):
     video_path = os.path.join(folder, 'video.mp4')
     cover_path = os.path.join(folder, 'video.png')
 
+    if not os.path.exists(video_path):
+        raise FileNotFoundError(f'合成视频不存在: {video_path}，请确认视频合成步骤已正确执行')
+    if not os.path.exists(cover_path):
+        raise FileNotFoundError(f'封面图片不存在: {cover_path}，请确认信息生成步骤已正确执行')
+    if not os.path.exists(os.path.join(folder, 'summary.json')):
+        raise FileNotFoundError(f'摘要文件不存在: {os.path.join(folder, "summary.json")}，请确认翻译步骤已正确执行')
+    if not os.path.exists(os.path.join(folder, 'download.info.json')):
+        raise FileNotFoundError(f'元数据文件不存在: {os.path.join(folder, "download.info.json")}，请确认下载步骤已正确执行')
+
     # Load summary data
     with open(os.path.join(folder, 'summary.json'), 'r', encoding='utf-8') as f:
         summary = json.load(f)
@@ -105,9 +114,18 @@ def upload_video(folder):
     raise Exception('上传失败')
 
 def upload_all_videos_under_folder(folder):
+    found_video_dir = False
     for dir, _, files in os.walk(folder):
-        if 'video.mp4' in files:
-            upload_video(dir)
+        if 'video.mp4' not in files and 'bilibili.json' not in files:
+            continue
+        found_video_dir = True
+        if 'video.mp4' not in files:
+            raise FileNotFoundError(
+                f'发现视频目录 {dir} 但缺少 video.mp4，请确认视频合成步骤已正确执行。目录内容: {files}'
+            )
+        upload_video(dir)
+    if not found_video_dir:
+        raise FileNotFoundError(f'在 {folder} 下未找到任何视频处理目录')
     return f'All videos under {folder} uploaded.'
 
 if __name__ == '__main__':

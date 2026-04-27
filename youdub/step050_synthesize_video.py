@@ -6,6 +6,8 @@ import time
 
 from loguru import logger
 
+from .config import ensure_ffmpeg_available, get_ffmpeg_path
+
 
 def split_text(input_data,
                punctuations=['，', '；', '：', '。', '？', '！', '\n', '”']):
@@ -98,6 +100,17 @@ def convert_resolution(aspect_ratio, resolution='1080p'):
     return width, height
     
 def synthesize_video(folder, subtitles=True, speed_up=1.05, fps=30, resolution='1080p'):
+    ffmpeg_available, ffmpeg_msg = ensure_ffmpeg_available(auto_download=True)
+    if not ffmpeg_available:
+        raise RuntimeError(
+            f'FFmpeg 不可用，无法进行视频合成。{ffmpeg_msg}\n'
+            f'请按以下方式之一安装 FFmpeg：\n'
+            f'1. 运行 python scripts/download_ffmpeg.py 自动下载\n'
+            f'2. Windows: 从 https://ffmpeg.org/download.html 下载，解压后将 bin 目录添加到系统 PATH，或在配置中设置 FFMPEG_PATH\n'
+            f'3. macOS: brew install ffmpeg\n'
+            f'4. Linux: sudo apt install ffmpeg'
+        )
+    
     if os.path.exists(os.path.join(folder, 'video.mp4')):
         logger.info(f'Video already synthesized in {folder}')
         return
@@ -106,8 +119,12 @@ def synthesize_video(folder, subtitles=True, speed_up=1.05, fps=30, resolution='
     input_audio = os.path.join(folder, 'audio_combined.wav')
     input_video = os.path.join(folder, 'download.mp4')
     
-    if not os.path.exists(translation_path) or not os.path.exists(input_audio):
-        return
+    if not os.path.exists(input_video):
+        raise FileNotFoundError(f'视频文件不存在: {input_video}，请确认下载步骤已正确执行')
+    if not os.path.exists(translation_path):
+        raise FileNotFoundError(f'翻译文件不存在: {translation_path}，请确认翻译步骤已正确执行')
+    if not os.path.exists(input_audio):
+        raise FileNotFoundError(f'合成音频不存在: {input_audio}，请确认TTS步骤已正确执行')
     
     with open(translation_path, 'r', encoding='utf-8') as f:
         translation = json.load(f)
@@ -129,8 +146,10 @@ def synthesize_video(folder, subtitles=True, speed_up=1.05, fps=30, resolution='
         filter_complex = f"[0:v]{video_speed_filter},{subtitle_filter}[v];[1:a]{audio_speed_filter}[a]"
     else:
         filter_complex = f"[0:v]{video_speed_filter}[v];[1:a]{audio_speed_filter}[a]"
+    
+    ffmpeg_path = get_ffmpeg_path()
     ffmpeg_command = [
-        'ffmpeg',
+        ffmpeg_path,
         '-i', input_video,
         '-i', input_audio,
         '-filter_complex', filter_complex,
@@ -148,10 +167,21 @@ def synthesize_video(folder, subtitles=True, speed_up=1.05, fps=30, resolution='
     
 
 def synthesize_all_video_under_folder(folder, subtitles=True, speed_up=1.05, fps=30, resolution='1080p'):
+    found_video_dir = False
     for root, dirs, files in os.walk(folder):
-        if 'download.mp4' in files and 'video.mp4' not in files:
-            synthesize_video(root, subtitles=subtitles,
-                             speed_up=speed_up, fps=fps, resolution=resolution)
+        if 'download.mp4' not in files and 'video.mp4' not in files:
+            continue
+        found_video_dir = True
+        if 'download.mp4' not in files:
+            raise FileNotFoundError(
+                f'发现视频目录 {root} 但缺少 download.mp4，请确认下载步骤已正确执行。目录内容: {files}'
+            )
+        if 'video.mp4' in files:
+            continue
+        synthesize_video(root, subtitles=subtitles,
+                         speed_up=speed_up, fps=fps, resolution=resolution)
+    if not found_video_dir:
+        raise FileNotFoundError(f'在 {folder} 下未找到任何视频处理目录')
     return f'Synthesized all videos under {folder}'
 if __name__ == '__main__':
     folder = r'videos\3Blue1Brown\20231207 Im still astounded this is true'
