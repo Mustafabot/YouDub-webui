@@ -13,6 +13,7 @@ import sys
 import os
 import argparse
 import string
+from loguru import logger
 import re
 import csv
 
@@ -1134,8 +1135,7 @@ class TextNorm:
         if self.check_chars:
             for c in text:
                 if not IN_VALID_CHARS.get(c):
-                    print(
-                        f'WARNING: illegal char {c} in: {text}', file=sys.stderr)
+                    logger.warning(f'illegal char {c} in: {text}')
                     return ''
 
         if self.remove_space:

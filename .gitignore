@@ -170,3 +170,5 @@ launch.json
 remove_mp4.py
 youdub/config.json
 .trae/
+bin/
+test_retry/

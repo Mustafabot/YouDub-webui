@@ -9,6 +9,36 @@ echo   YouDub Windows Setup
 echo ============================================
 echo.
 
+:: Auto-detect pip mirror for China users
+set PIP_MIRROR=
+set PIP_MIRROR_HOST=
+echo [0/8] Detecting fastest pip mirror...
+for %%m in (
+    "https://pypi.tuna.tsinghua.edu.cn/simple|pypi.tuna.tsinghua.edu.cn"
+    "https://mirrors.aliyun.com/pypi/simple/|mirrors.aliyun.com"
+    "https://mirrors.cloud.tencent.com/pypi/simple|mirrors.cloud.tencent.com"
+    "https://repo.huaweicloud.com/repository/pypi/simple|repo.huaweicloud.com"
+) do (
+    for /f "tokens=1,2 delims=|" %%a in ("%%m") do (
+        if "!PIP_MIRROR!"=="" (
+            curl -s --connect-timeout 3 %%a >nul 2>&1
+            if !ERRORLEVEL! EQU 0 (
+                set PIP_MIRROR=%%a
+                set PIP_MIRROR_HOST=%%b
+                echo         Found mirror: %%b
+                echo [%%date%% %%time%%] Using mirror: %%b >> %LOGFILE%
+            )
+        )
+    )
+)
+if "!PIP_MIRROR!"=="" (
+    echo         No mirror detected, using default PyPI.
+    echo [%date% %time%] No mirror, using default PyPI >> %LOGFILE%
+    set PIP_MIRROR_OPTS=
+) else (
+    set PIP_MIRROR_OPTS=-i !PIP_MIRROR! --trusted-host !PIP_MIRROR_HOST!
+)
+
 :: Check for Python 3.8+
 echo [1/7] Checking Python version...
 py -c "import sys; ver=tuple(map(int,sys.version.split()[0].split('.'))); sys.exit(0 if ver>=(3,8) else 1)" >nul 2>&1
@@ -54,7 +84,7 @@ IF %ERRORLEVEL% NEQ 0 (
 :: Upgrade pip
 echo.
 echo [3/7] Upgrading pip...
-python -m pip install --upgrade pip >> %LOGFILE% 2>&1
+python -m pip install --upgrade pip !PIP_MIRROR_OPTS! >> %LOGFILE% 2>&1
 IF %ERRORLEVEL% NEQ 0 (
     echo [WARNING] pip upgrade failed, continuing with current version...
     echo [%date% %time%] WARNING: pip upgrade failed >> %LOGFILE%
@@ -66,7 +96,7 @@ IF %ERRORLEVEL% NEQ 0 (
 :: Install requirements
 echo.
 echo [4/7] Installing requirements from requirements.txt...
-pip install -r requirements.txt >> %LOGFILE% 2>&1
+pip install -r requirements.txt !PIP_MIRROR_OPTS! >> %LOGFILE% 2>&1
 IF %ERRORLEVEL% NEQ 0 (
     echo [ERROR] Failed to install requirements. Check install.log for details.
     echo [%date% %time%] ERROR: requirements install failed >> %LOGFILE%
@@ -79,7 +109,7 @@ echo [%date% %time%] Requirements installed >> %LOGFILE%
 :: Install TTS (optional, non-blocking)
 echo.
 echo [5/7] Installing TTS (optional)...
-pip install TTS >> %LOGFILE% 2>&1
+pip install TTS !PIP_MIRROR_OPTS! >> %LOGFILE% 2>&1
 IF %ERRORLEVEL% NEQ 0 (
     echo [WARNING] TTS installation failed. You can install it manually later with: pip install TTS
     echo [%date% %time%] WARNING: TTS install failed >> %LOGFILE%
@@ -146,9 +176,9 @@ IF %ERRORLEVEL% EQU 0 (
 
 echo         Installing PyTorch for !TORCH_LABEL!...
 if defined TORCH_INDEX (
-    pip install torch torchvision torchaudio --index-url !TORCH_INDEX! >> %LOGFILE% 2>&1
+    pip install torch torchvision torchaudio --index-url !TORCH_INDEX! !PIP_MIRROR_OPTS! >> %LOGFILE% 2>&1
 ) else (
-    pip install torch torchvision torchaudio >> %LOGFILE% 2>&1
+    pip install torch torchvision torchaudio !PIP_MIRROR_OPTS! >> %LOGFILE% 2>&1
 )
 IF %ERRORLEVEL% NEQ 0 (
     echo [ERROR] Failed to install PyTorch. Check install.log for details.
@@ -159,9 +189,29 @@ IF %ERRORLEVEL% NEQ 0 (
 echo         PyTorch (!TORCH_LABEL!) installed successfully.
 echo [%date% %time%] PyTorch !TORCH_LABEL! installed >> %LOGFILE%
 
+:: Verify numba/numpy compatibility
+echo.
+echo [7/8] Verifying dependency compatibility...
+python -c "import numba; import numpy; print(f'Numba {numba.__version__} + NumPy {numpy.__version__}')" >> %LOGFILE% 2>&1
+IF %ERRORLEVEL% EQU 0 (
+    echo         numba/numpy compatibility verified.
+    echo [%date% %time%] Dependency check passed >> %LOGFILE%
+) else (
+    echo [WARNING] Dependency check failed. Attempting to fix by reinstalling...
+    echo [%date% %time%] WARNING: Dependency check failed >> %LOGFILE%
+    python -m pip install "numpy<2.4" "numba>=0.63" !PIP_MIRROR_OPTS! >> %LOGFILE% 2>&1
+    IF %ERRORLEVEL% EQU 0 (
+        echo         Fixed dependencies automatically.
+        echo [%date% %time%] Dependencies fixed >> %LOGFILE%
+    ) else (
+        echo [WARNING] Could not auto-fix dependencies. Check install.log for details.
+        echo [%date% %time%] WARNING: Auto-fix failed >> %LOGFILE%
+    )
+)
+
 :: Create .env from .env.example if not exists
 echo.
-echo [7/7] Checking .env configuration...
+echo [8/8] Checking .env configuration...
 IF NOT EXIST ".env" (
     IF EXIST ".env.example" (
         copy .env.example .env >nul 2>&1

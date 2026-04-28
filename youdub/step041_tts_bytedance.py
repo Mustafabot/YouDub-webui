@@ -18,24 +18,17 @@ from scipy.spatial.distance import cosine
 
 from .config import get_config
 
-def get_bytedance_config():
-    return get_config('BYTEDANCE_APPID'), get_config('BYTEDANCE_ACCESS_TOKEN')
-
-appid, access_token = get_bytedance_config()
-
 host = "openspeech.bytedance.com"
 api_url = f"https://{host}/api/v1/tts"
 
 def get_header():
     return {"Authorization": f"Bearer;{get_config('BYTEDANCE_ACCESS_TOKEN')}"}
 
-header = get_header()
-
 def get_request_json(voice_type='BV001_streaming'):
     return {
     "app": {
         "appid": get_config('BYTEDANCE_APPID'),
-        "token": "access_token",
+        "token": get_config('BYTEDANCE_ACCESS_TOKEN'),
         "cluster": 'volcano_tts'
     },
     "user": {
@@ -64,11 +57,15 @@ embedding_inference = None
 try:
     hf_token = get_config('HF_TOKEN')
     if hf_token:
-        embedding_model = Model.from_pretrained(
+        loaded_model = Model.from_pretrained(
             "pyannote/embedding", use_auth_token=hf_token)
-        embedding_inference = Inference(
-            embedding_model, window="whole")
-        logger.info("pyannote/embedding model loaded successfully")
+        if loaded_model is not None:
+            embedding_model = loaded_model
+            embedding_inference = Inference(
+                embedding_model, window="whole")
+            logger.info("pyannote/embedding model loaded successfully")
+        else:
+            logger.warning("pyannote/embedding model returned None (token may be invalid or model is gated)")
     else:
         logger.warning("HF_TOKEN not set, embedding model will not be loaded")
 except Exception as e:
@@ -76,6 +73,8 @@ except Exception as e:
     logger.warning("Speaker embedding functionality will be disabled")
 
 def generate_embedding(wav_path):
+    if embedding_inference is None:
+        raise RuntimeError("Embedding model not loaded. Check HF_TOKEN and network connection.")
     embedding = embedding_inference(wav_path)
     return embedding
 

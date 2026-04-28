@@ -11,5 +11,9 @@ audiostretchy
 bilibili_toolman
 Pillow
 
+# Version constraints: numba (via librosa) requires numpy<2.4; numba>=0.63 for modern numpy support
+numpy>=1.22,<2.4
+numba>=0.63
+
 # Optional dependencies (installed by setup_windows.bat, can be installed manually if needed):
 # TTS  - Coqui TTS library, install with: pip install TTS

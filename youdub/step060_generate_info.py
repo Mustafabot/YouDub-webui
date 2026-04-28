@@ -2,40 +2,39 @@ import json
 import os
 from PIL import Image
 
+from .config import PROJECT_ROOT
+
 
 def resize_thumbnail(folder, size=(1280, 960)):
     image_suffix = ['.jpg', '.jpeg', '.png', '.bmp', '.webp']
+    image_path = None
     for suffix in image_suffix:
-        image_path = os.path.join(folder, f'download{suffix}')
-        if os.path.exists(image_path):
+        candidate_path = os.path.join(folder, f'download{suffix}')
+        if os.path.exists(candidate_path):
+            image_path = candidate_path
             break
+    if image_path is None:
+        raise FileNotFoundError(f'在 {folder} 中未找到任何图片文件（支持格式：{", ".join(image_suffix)}）')
     with Image.open(image_path) as img:
-        # Calculate the ratio and the size to maintain aspect ratio
         img_ratio = img.width / img.height
         target_ratio = size[0] / size[1]
 
         if img_ratio < target_ratio:
-            # Image is wider than target ratio, fix height to the desired size
             new_height = size[1]
             new_width = int(new_height * img_ratio)
         else:
-            # Image is taller than target ratio, fix width to the desired size
             new_width = size[0]
             new_height = int(new_width / img_ratio)
 
-        # Resize the image with high-quality resampling
         img = img.resize((new_width, new_height), Image.Resampling.LANCZOS)
 
-        # Create a black image of the target size
         new_img = Image.new('RGB', size, "black")
 
-        # Paste the resized image onto the center of the black image
         x_offset = (size[0] - new_width) // 2
         y_offset = (size[1] - new_height) // 2
         new_img.paste(img, (x_offset, y_offset))
 
-        # Save or return the new image
-        new_img_path = os.path.join(folder, 'video.png')  # Modify as needed
+        new_img_path = os.path.join(folder, 'video.png')
         new_img.save(new_img_path)
         return new_img_path
 
@@ -56,6 +55,8 @@ def generate_info(folder):
     resize_thumbnail(folder)
     
 def generate_all_info_under_folder(root_folder):
+    if not os.path.isabs(root_folder):
+        root_folder = str(PROJECT_ROOT / root_folder)
     found_video_dir = False
     for root, dirs, files in os.walk(root_folder):
         if 'download.info.json' not in files and 'video.txt' not in files:

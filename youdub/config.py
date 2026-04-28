@@ -25,6 +25,8 @@ DEFAULT_CONFIG = {
     "OPENAI_API_EXTRA_BODY": "",
     "HF_TOKEN": "",
     "HF_ENDPOINT": "",
+    "PIP_INDEX_URL": "",
+    "DOWNLOAD_TIMEOUT": 120,
     "BYTEDANCE_APPID": "",
     "BYTEDANCE_ACCESS_TOKEN": "",
     "BILI_SESSDATA": "",
@@ -170,7 +172,7 @@ def ensure_ffmpeg_available(auto_download=True):
     
     try:
         from download_ffmpeg import download_ffmpeg
-        print("FFmpeg 未找到，正在尝试自动下载...")
+        logger.info("FFmpeg 未找到，正在尝试自动下载...")
         success, result = download_ffmpeg()
         if success:
             _ffmpeg_cache["path"] = None
@@ -185,7 +187,11 @@ def ensure_ffmpeg_available(auto_download=True):
 def load_config():
     if CONFIG_FILE.exists():
         with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
-            return json.load(f)
+            config = json.load(f)
+        if config.get("HF_ENDPOINT"):
+            os.environ["HF_ENDPOINT"] = config["HF_ENDPOINT"]
+            os.environ["HUGGINGFACE_HUB_URL"] = config["HF_ENDPOINT"]
+        return config
     return DEFAULT_CONFIG.copy()
 
 
@@ -193,6 +199,8 @@ def save_config(config):
     with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
         json.dump(config, f, indent=4, ensure_ascii=False)
     os.environ.update({k: str(v) for k, v in config.items() if v})
+    if config.get("HF_ENDPOINT"):
+        os.environ["HUGGINGFACE_HUB_URL"] = config["HF_ENDPOINT"]
 
 
 def get_config(key, default=None):
@@ -245,6 +253,16 @@ def get_offline_capabilities():
     }
 
 
+def is_offline_mode():
+    """检查是否处于离线模式"""
+    return not check_network()
+
+
+def get_hf_local_files_only():
+    """根据网络状态返回 HuggingFace 模型加载时的 local_files_only 参数"""
+    return is_offline_mode()
+
+
 def get_config_status():
     status = {}
     for key in DEFAULT_CONFIG:
@@ -264,4 +282,27 @@ def get_config_status():
         "path": get_ffmpeg_path(),
         "can_download": True,
     }
+
+    try:
+        from .model_manager import check_all_models_status
+        model_statuses = check_all_models_status()
+        downloaded = sum(1 for s in model_statuses.values() if s["downloaded"])
+        total = len(model_statuses)
+        status["MODELS"] = {
+            "set": downloaded == total,
+            "required": True,
+            "feature": "AI模型",
+            "message": f"已下载 {downloaded}/{total} 个模型",
+            "downloaded": downloaded,
+            "total": total,
+            "models": model_statuses,
+        }
+    except Exception as e:
+        status["MODELS"] = {
+            "set": False,
+            "required": True,
+            "feature": "AI模型",
+            "message": f"模型状态检查失败: {e}",
+        }
+
     return status

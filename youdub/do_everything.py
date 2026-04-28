@@ -122,12 +122,13 @@ def process_video(info, root_folder, resolution, demucs_model, device, shifts, w
             
             logger.info(f"Process video in {folder}")
             
-            from .step010_demucs_vr import separate_all_audio_under_folder
-            from .step020_whisperx import transcribe_all_audio_under_folder
+            from .step010_demucs_vr import separate_all_audio_under_folder, cleanup_demucs
+            from .step020_whisperx import transcribe_all_audio_under_folder, cleanup_whisperx
             from .step030_translation import translate_all_transcript_under_folder
             from .step040_tts import generate_all_wavs_under_folder
+            from .step043_tts_f5 import cleanup_f5tts
             from .step050_synthesize_video import synthesize_all_video_under_folder
-            from .step060_genrate_info import generate_all_info_under_folder
+            from .step060_generate_info import generate_all_info_under_folder
             from .step070_upload_bilibili import upload_all_videos_under_folder
             
             separate_all_audio_under_folder(
@@ -149,6 +150,12 @@ def process_video(info, root_folder, resolution, demucs_model, device, shifts, w
             return True
         except Exception as e:
             logger.error(f"Error processing video {info['title']}: {e}")
+            try:
+                cleanup_demucs()
+                cleanup_whisperx()
+                cleanup_f5tts()
+            except Exception:
+                pass
     return False
 
 
@@ -174,16 +181,6 @@ def do_everything(root_folder, url=None, local_video_paths=None, num_videos=5, r
     else:
         return "Error: Please provide either video URL(s) or local video file(s)"
     
-    from concurrent.futures import ThreadPoolExecutor
-    
-    with ThreadPoolExecutor() as executor:
-        from .step010_demucs_vr import init_demucs
-        from .step042_tts_xtts import init_TTS
-        from .step020_whisperx import init_whisperx
-        executor.submit(init_demucs)
-        executor.submit(init_TTS)
-        executor.submit(init_whisperx)
-
     params = {
         "resolution": resolution,
         "demucs_model": demucs_model,

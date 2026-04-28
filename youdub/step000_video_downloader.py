@@ -7,7 +7,7 @@ from pathlib import Path
 from loguru import logger
 import yt_dlp
 
-from .config import ensure_ffmpeg_available, get_ffmpeg_path
+from .config import ensure_ffmpeg_available, get_ffmpeg_path, PROJECT_ROOT
 
 
 def sanitize_title(title):
@@ -292,6 +292,27 @@ def process_local_video(video_info, folder_path):
     
     logger.info(f'Local video processed: {output_folder}')
     return output_folder
+
+
+def download_all_videos_under_folder(root_folder, url=None, video_path=None, resolution="1080p", num_videos=5):
+    """扫描文件夹下载待下载的视频"""
+    if not os.path.isabs(root_folder):
+        root_folder = str(PROJECT_ROOT / root_folder)
+    found_video_dir = False
+    for root, dirs, files in os.walk(root_folder):
+        if 'download.info.json' not in files:
+            continue
+        if 'download.mp4' in files:
+            continue
+        found_video_dir = True
+        info_path = os.path.join(root, 'download.info.json')
+        with open(info_path, 'r', encoding='utf-8') as f:
+            info = json.load(f)
+        parent = os.path.dirname(root)
+        download_single_video(info, parent, resolution)
+    if not found_video_dir:
+        logger.info(f'No videos to download under {root_folder}')
+    return f'Downloaded all videos under {root_folder}'
 
 
 if __name__ == '__main__':

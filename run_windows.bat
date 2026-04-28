@@ -73,13 +73,13 @@ if "!SHARE_FLAG!"=="1" (
 
 echo ============================================
 echo   YouDub WebUI is starting...
-echo   Access: http://localhost:7860
+echo   Access: http://127.0.0.1:19876
 echo   Press Ctrl+C to stop the application
 echo ============================================
 echo.
 
 :: Auto-open browser after a short delay
-start "" cmd /c "timeout /t 3 /nobreak >nul && start http://localhost:7860"
+start "" cmd /c "timeout /t 3 /nobreak >nul && start http://127.0.0.1:19876"
 
 :: Launch the application
 if "!SHARE_FLAG!"=="1" (

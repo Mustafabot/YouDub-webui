@@ -6,7 +6,7 @@ from bilibili_toolman.bilisession.web import BiliSession
 from bilibili_toolman.bilisession.common.submission import Submission
 from loguru import logger
 
-from .config import get_config
+from .config import get_config, PROJECT_ROOT
 
 def bili_login():
 
@@ -114,6 +114,8 @@ def upload_video(folder):
     raise Exception('上传失败')
 
 def upload_all_videos_under_folder(folder):
+    if not os.path.isabs(folder):
+        folder = str(PROJECT_ROOT / folder)
     found_video_dir = False
     for dir, _, files in os.walk(folder):
         if 'video.mp4' not in files and 'bilibili.json' not in files:

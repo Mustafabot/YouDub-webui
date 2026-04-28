@@ -1,37 +1,41 @@
 import shutil
 from demucs.api import Separator
 import os
+import subprocess
 from loguru import logger
 import time
 from .utils import save_wav, normalize_wav
-from .config import ensure_ffmpeg_available, get_ffmpeg_path
+from .config import ensure_ffmpeg_available, get_ffmpeg_path, PROJECT_ROOT
 import torch
 auto_device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 separator = None
 
-def init_demucs():
+def init_demucs(model_name: str = "htdemucs_ft", device: str = 'auto', progress: bool = True, shifts: int = 5):
+    pass
+
+
+def cleanup_demucs():
+    """清理 Demucs 模型，释放显存"""
     global separator
-    separator = load_model()
+    import gc
+    import torch
     
+    if separator is not None:
+        del separator
+        separator = None
+    
+    gc.collect()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+    logger.info('Demucs 模型已清理，显存已释放')
+
 def load_model(model_name: str = "htdemucs_ft", device: str = 'auto', progress: bool = True, shifts: int=5) -> Separator:
     global separator
-    if separator is not None:
-        logger.info(f'Demucs model already loaded')
-        return
-    
-    logger.info(f'Loading Demucs model: {model_name}')
+    logger.info(f'Loading Demucs model: {model_name} (device={device}, shifts={shifts})')
     t_start = time.time()
     separator = Separator(model_name, device=auto_device if device=='auto' else device, progress=progress, shifts=shifts)
     t_end = time.time()
     logger.info(f'Demucs model loaded in {t_end - t_start:.2f} seconds')
-
-def reload_model(model_name: str = "htdemucs_ft", device: str = 'auto', progress: bool = True, shifts: int=5) -> Separator:
-    global separator
-    logger.info(f'Reloading Demucs model: {model_name}')
-    t_start = time.time()
-    separator = Separator(model_name, device=auto_device if device=='auto' else device, progress=progress, shifts=shifts)
-    t_end = time.time()
-    logger.info(f'Demucs model reloaded in {t_end - t_start:.2f} seconds')
     
 def separate_audio(folder: str, model_name: str = "htdemucs_ft", device: str = 'auto', progress: bool = True, shifts: int = 5) -> None:
     global separator
@@ -46,18 +50,16 @@ def separate_audio(folder: str, model_name: str = "htdemucs_ft", device: str = '
         return
     
     logger.info(f'Separating audio from {folder}')
+    logger.info(f'注意: {model_name} 模型将分离 4 个音轨 (drums, bass, other, vocals)，每个音轨都会显示独立的进度条')
     load_model(model_name, device, progress, shifts)
     t_start = time.time()
     try:
         origin, separated = separator.separate_audio_file(audio_path)
-    except:
-        # reload_model(model_name, device, progress, shifts)
-                # origin, separated = separator.separate_audio_file(audio_path)
-        time.sleep(5)
-        logger.error(f'Error separating audio from {folder}')
-        raise Exception(f'Error separating audio from {folder}')
+    except Exception as e:
+        logger.error(f'Error separating audio from {folder}: {e}')
+        raise
     t_end = time.time()
-    logger.info(f'Audio separated in {t_end - t_start:.2f} seconds')
+    logger.info(f'Audio separated in {t_end - t_start:.2f} seconds, separated tracks: {list(separated.keys())}')
     
     vocals = separated['vocals'].numpy().T
     instruments = None
@@ -101,36 +103,90 @@ def extract_audio_from_video(folder: str) -> bool:
     logger.info(f'Extracting audio from {folder}')
 
     ffmpeg_path = get_ffmpeg_path()
-    os.system(
-        f'"{ffmpeg_path}" -loglevel error -i "{video_path}" -vn -acodec pcm_s16le -ar 44100 -ac 2 "{audio_path}"')
+    cmd = [
+        str(ffmpeg_path),
+        '-loglevel', 'error',
+        '-i', str(video_path),
+        '-vn',
+        '-acodec', 'pcm_s16le',
+        '-ar', '44100',
+        '-ac', '2',
+        str(audio_path)
+    ]
     
-    time.sleep(1)
-    logger.info(f'Audio extracted from {folder}')
+    logger.info(f'执行 FFmpeg 命令: {" ".join(cmd)}')
+    result = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8')
+    
+    if result.returncode != 0:
+        error_msg = result.stderr.strip() if result.stderr else '未知错误'
+        raise RuntimeError(
+            f'音频提取失败，FFmpeg 返回错误码 {result.returncode}: {error_msg}\n'
+            f'命令: {" ".join(cmd)}'
+        )
+    
+    if not os.path.exists(audio_path):
+        raise RuntimeError(
+            f'FFmpeg 执行成功但未生成音频文件: {audio_path}\n'
+            f'请检查视频文件 {video_path} 是否损坏'
+        )
+    
+    file_size = os.path.getsize(audio_path)
+    if file_size == 0:
+        raise RuntimeError(f'生成的音频文件为空: {audio_path}')
+    
+    logger.info(f'Audio extracted from {folder}, size: {file_size} bytes')
     return True
     
 def separate_all_audio_under_folder(root_folder: str, model_name: str = "htdemucs_ft", device: str = 'auto', progress: bool = True, shifts: int = 5) -> None:
+    if not os.path.isabs(root_folder):
+        root_folder = str(PROJECT_ROOT / root_folder)
     global separator
     found_video_dir = False
-    for subdir, dirs, files in os.walk(root_folder):
-        if 'download.mp4' not in files:
-            if 'download.info.json' in files:
-                raise FileNotFoundError(
-                    f'发现视频目录 {subdir} 但缺少 download.mp4，'
-                    f'请确认下载步骤已正确执行。目录内容: {files}'
-                )
-            continue
+    processed_dirs = set()
+    
+    logger.info(f'开始遍历目录: {root_folder}')
+    try:
+        for subdir, dirs, files in os.walk(root_folder):
+            if subdir in processed_dirs:
+                logger.debug(f'跳过已处理目录: {subdir}')
+                continue
+            
+            video_path = os.path.join(subdir, 'download.mp4')
+            if not os.path.exists(video_path):
+                if os.path.exists(os.path.join(subdir, 'download.info.json')):
+                    raise FileNotFoundError(
+                        f'发现视频目录 {subdir} 但缺少 download.mp4，'
+                        f'请确认下载步骤已正确执行。'
+                    )
+                continue
+            
+            found_video_dir = True
+            logger.info(f'处理视频目录: {subdir}')
+            
+            audio_path = os.path.join(subdir, 'audio.wav')
+            if not os.path.exists(audio_path):
+                logger.info(f'提取音频: {subdir}')
+                extract_audio_from_video(subdir)
+            
+            vocal_output_path = os.path.join(subdir, 'audio_vocals.wav')
+            instruments_output_path = os.path.join(subdir, 'audio_instruments.wav')
+            if not os.path.exists(vocal_output_path) or not os.path.exists(instruments_output_path):
+                logger.info(f'分离人声和伴奏: {subdir}')
+                separate_audio(subdir, model_name, device, progress, shifts)
+            else:
+                logger.info(f'音频已分离，跳过: {subdir}')
+            
+            processed_dirs.add(subdir)
         
-        found_video_dir = True
-        if 'audio.wav' not in files:
-            extract_audio_from_video(subdir)
-        if 'audio_vocals.wav' not in files:
-            separate_audio(subdir, model_name, device, progress, shifts)
+        logger.info(f'遍历完成，共处理 {len(processed_dirs)} 个视频目录')
+        
+        if not found_video_dir:
+            raise FileNotFoundError(f'在 {root_folder} 下未找到任何包含 download.mp4 的视频目录')
 
-    if not found_video_dir:
-        raise FileNotFoundError(f'在 {root_folder} 下未找到任何包含 download.mp4 的视频目录')
-
-    logger.info(f'All audio separated under {root_folder}')
-    return f'All audio separated under {root_folder}'
+        logger.info(f'All audio separated under {root_folder}')
+        return f'All audio separated under {root_folder}'
+    finally:
+        cleanup_demucs()
     
 if __name__ == '__main__':
     folder = r"videos"

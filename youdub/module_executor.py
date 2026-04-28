@@ -7,6 +7,7 @@ from .module_registry import (
     get_module_input_files, get_input_file_producer
 )
 from .config import check_network, check_ffmpeg_available, ensure_ffmpeg_available
+from .model_manager import check_model_status, get_model_info
 
 def build_execution_plan(selected_modules):
     """根据选择的模块构建执行计划（仅排序，不自动添加上游依赖）"""
@@ -41,6 +42,14 @@ def validate_execution_plan(execution_plan):
             missing = get_module_missing_config(module_id)
             if missing:
                 warnings.append(f"模块 {module['name']} 缺少配置: {', '.join(missing)}")
+        
+        required_models = module.get("required_models", [])
+        for model_id in required_models:
+            status = check_model_status(model_id)
+            if not status["downloaded"]:
+                model_info = get_model_info(model_id)
+                model_name = model_info["name"] if model_info else model_id
+                warnings.append(f"模块 {module['name']} 需要模型「{model_name}」尚未下载，请在设置页面下载模型")
         
         input_files = module.get("input_files", [])
         if input_files:
@@ -153,9 +162,9 @@ class ModuleExecutor:
         """根据模块ID提取对应的参数"""
         param_mapping = {
             "video_download": {
-                "url": params.get("video_url"),
+                "url": params.get("url"),
                 "video_path": params.get("video_path"),
-                "resolution": params.get("video_resolution", "1080p"),
+                "resolution": params.get("resolution", "1080p"),
                 "num_videos": params.get("num_videos", 5),
             },
             "audio_separation": {
@@ -198,16 +207,16 @@ def create_default_executor():
     from .step020_whisperx import transcribe_all_audio_under_folder, init_whisperx
     from .step030_translation import translate_all_transcript_under_folder
     from .step040_tts import generate_all_wavs_under_folder
-    from .step042_tts_xtts import init_TTS
+    from .step043_tts_f5 import init_F5TTS
     from .step050_synthesize_video import synthesize_all_video_under_folder
-    from .step060_genrate_info import generate_all_info_under_folder
+    from .step060_generate_info import generate_all_info_under_folder
     from .step070_upload_bilibili import upload_all_videos_under_folder
     
     executor.register_module_function("video_download", download_all_videos_under_folder)
     executor.register_module_function("audio_separation", separate_all_audio_under_folder, init_demucs)
     executor.register_module_function("speech_recognition", transcribe_all_audio_under_folder, init_whisperx)
     executor.register_module_function("translation", translate_all_transcript_under_folder)
-    executor.register_module_function("tts", generate_all_wavs_under_folder, init_TTS)
+    executor.register_module_function("tts", generate_all_wavs_under_folder, init_F5TTS)
     executor.register_module_function("video_synthesis", synthesize_all_video_under_folder)
     executor.register_module_function("generate_info", generate_all_info_under_folder)
     executor.register_module_function("upload_bilibili", upload_all_videos_under_folder)
@@ -234,5 +243,6 @@ def get_module_with_info():
             "dependencies": deps,
             "online_only": m["online_only"],
             "required_config": m["required_config"],
+            "required_models": m.get("required_models", []),
         })
     return result

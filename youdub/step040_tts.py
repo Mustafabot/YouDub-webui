@@ -7,8 +7,10 @@ from loguru import logger
 import numpy as np
 
 from .utils import save_wav, save_wav_norm
+from .config import get_config, PROJECT_ROOT
 from .step041_tts_bytedance import tts as bytedance_tts
-from .step042_tts_xtts import tts as xtts_tts
+from .step043_tts_f5 import tts as f5_tts, F5_AVAILABLE
+from .step020_whisperx import generate_speaker_audio
 from .cn_tx import TextNorm
 from audiostretchy.stretch import stretch_audio
 normalizer = TextNorm()
@@ -55,20 +57,78 @@ def generate_wavs(folder, force_bytedance=False):
     for line in transcript:
         speakers.add(line['speaker'])
     num_speakers = len(speakers)
-    logger.info(f'Found {num_speakers} speakers')
+    num_segments = len(transcript)
+    logger.info(f'共 {num_speakers} 个说话人, {num_segments} 个片段需要合成')
     
+    has_bytedance_config = bool(get_config('BYTEDANCE_APPID') and get_config('BYTEDANCE_ACCESS_TOKEN'))
+    
+    if force_bytedance:
+        if not has_bytedance_config:
+            raise RuntimeError('强制使用火山引擎 TTS 但未配置。请在设置中配置 BYTEDANCE_APPID 和 BYTEDANCE_ACCESS_TOKEN')
+        use_bytedance = True
+    elif num_speakers == 1 and has_bytedance_config:
+        use_bytedance = True
+        logger.info('单说话人场景，使用火山引擎 TTS')
+    elif F5_AVAILABLE:
+        use_bytedance = False
+        logger.info('使用 F5-TTS 声音克隆')
+    else:
+        if has_bytedance_config:
+            use_bytedance = True
+            logger.warning('F5-TTS 未安装 (pip install f5-tts)，将使用火山引擎 TTS')
+        else:
+            raise RuntimeError(
+                '所有 TTS 引擎均不可用。请至少配置一种 TTS 方式：\n'
+                '1. 配置火山引擎 TTS (BYTEDANCE_APPID + BYTEDANCE_ACCESS_TOKEN)\n'
+                '2. 安装 F5-TTS (pip install f5-tts)'
+            )
+
+    ref_text_map = {}
+    speaker_folder = os.path.join(folder, 'SPEAKER')
+    
+    speakers = set()
+    for line in transcript:
+        speakers.add(line['speaker'])
+    
+    speaker_files_exist = True
+    if not os.path.exists(speaker_folder):
+        speaker_files_exist = False
+    else:
+        for speaker in speakers:
+            speaker_wav = os.path.join(speaker_folder, f'{speaker}.wav')
+            if not os.path.exists(speaker_wav):
+                speaker_files_exist = False
+                break
+    
+    if not speaker_files_exist:
+        logger.info(f'说话人音频文件不完整，重新生成: {speaker_folder}')
+        generate_speaker_audio(folder, transcript)
+    
+    if not use_bytedance:
+        for line in transcript:
+            speaker = line['speaker']
+            original_text = line.get('original', line.get('text', ''))
+            if speaker not in ref_text_map:
+                ref_text_map[speaker] = []
+            ref_text_map[speaker].append(original_text)
+        for speaker in ref_text_map:
+            ref_text_map[speaker] = ' '.join(ref_text_map[speaker][:3])
+
     full_wav = np.zeros((0, ))
+    total_segments = len(transcript)
     for i, line in enumerate(transcript):
         speaker = line['speaker']
         text = preprocess_text(line['translation'])
         output_path = os.path.join(output_folder, f'{str(i).zfill(4)}.wav')
         speaker_wav = os.path.join(folder, 'SPEAKER', f'{speaker}.wav')
-        if num_speakers == 1:
-            bytedance_tts(text, output_path, speaker_wav, voice_type='BV701_streaming')
-        elif force_bytedance:
-            bytedance_tts(text, output_path, speaker_wav)
+        logger.info(f"[{i+1}/{total_segments}] 正在合成 ({speaker}): {text[:50]}")
+        if use_bytedance:
+            voice_type = 'BV701_streaming' if num_speakers == 1 else None
+            bytedance_tts(text, output_path, speaker_wav, voice_type=voice_type)
         else:
-            xtts_tts(text, output_path, speaker_wav)
+            f5_tts(text, output_path, speaker_wav, ref_text=ref_text_map.get(speaker, ''))
+        if not os.path.exists(output_path):
+            raise RuntimeError(f'TTS 生成失败: {output_path}，请检查 TTS 配置')
         start = line['start']
         end = line['end']
         length = end-start
@@ -111,8 +171,12 @@ def generate_wavs(folder, force_bytedance=False):
         
 
 def generate_all_wavs_under_folder(root_folder, force_bytedance=False):
+    if not os.path.isabs(root_folder):
+        root_folder = str(PROJECT_ROOT / root_folder)
+    logger.info(f'开始语音合成扫描: {root_folder}')
     found_video_dir = False
     for root, dirs, files in os.walk(root_folder):
+        dirs[:] = [d for d in dirs if d not in ('wavs', 'SPEAKER')]
         if 'translation.json' not in files and 'audio_combined.wav' not in files:
             continue
         found_video_dir = True
@@ -121,10 +185,13 @@ def generate_all_wavs_under_folder(root_folder, force_bytedance=False):
                 f'发现视频目录 {root} 但缺少 translation.json，请确认翻译步骤已正确执行。目录内容: {files}'
             )
         if 'audio_combined.wav' in files:
+            logger.info(f'跳过已合成目录: {root}')
             continue
+        logger.info(f'处理目录: {root}')
         generate_wavs(root, force_bytedance)
     if not found_video_dir:
         raise FileNotFoundError(f'在 {root_folder} 下未找到任何视频处理目录')
+    logger.info(f'语音合成完成: {root_folder}')
     return f'Generated all wavs under {root_folder}'
 
 if __name__ == '__main__':

@@ -6,10 +6,14 @@ from openai import OpenAI
 import time
 from loguru import logger
 
-from .config import get_config
+from .config import get_config, PROJECT_ROOT
 
-model_name = get_config('MODEL_NAME', 'gpt-3.5-turbo')
-print(f'using model {model_name}')
+
+def get_model_name():
+    return get_config('MODEL_NAME', 'gpt-3.5-turbo')
+
+
+logger.info(f'using model {get_model_name()}')
 
 def get_api_params():
     params = {}
@@ -42,7 +46,7 @@ def build_extra_body():
         'repetition_penalty': 1.1,
     }
     
-    if model_name == "01ai/Yi-34B-Chat-4bits":
+    if get_model_name() == "01ai/Yi-34B-Chat-4bits":
         extra_body['stop_token_ids'] = [7]
     
     custom_extra = get_config('OPENAI_API_EXTRA_BODY', '')
@@ -60,7 +64,11 @@ def build_extra_body():
     
     return extra_body
 
-extra_body = build_extra_body()
+
+def get_extra_body():
+    return build_extra_body()
+
+
 def get_necessary_info(info: dict):
     return {
         'title': info['title'],
@@ -105,15 +113,15 @@ def summarize(info, transcript, target_language='简体中文'):
             ]
             api_params = get_api_params()
             response = client.chat.completions.create(
-                model=model_name,
+                model=get_model_name(),
                 messages=messages,
                 timeout=240,
-                extra_body=extra_body,
+                extra_body=get_extra_body(),
                 **api_params
             )
             summary = response.choices[0].message.content.replace('\n', '')
             if '视频标题' in summary:
-                raise Exception("包含“视频标题”")
+                raise Exception('包含"视频标题"')
             logger.info(summary)
             summary = re.findall(r'\{.*?\}', summary)[0]
             summary = json.loads(summary)
@@ -145,10 +153,10 @@ def summarize(info, transcript, target_language='简体中文'):
         try:
             api_params = get_api_params()
             response = client.chat.completions.create(
-                model=model_name,
+                model=get_model_name(),
                 messages=messages,
                 timeout=240,
-                extra_body=extra_body,
+                extra_body=get_extra_body(),
                 **api_params
             )
             summary = response.choices[0].message.content.replace('\n', '')
@@ -258,10 +266,10 @@ def valid_translation(text, translation):
 
 
 def split_text_into_sentences(para):
-    para = re.sub('([。！？\?])([^，。！？\?”’》])', r"\1\n\2", para)  # 单字符断句符
-    para = re.sub('(\.{6})([^，。！？\?”’》])', r"\1\n\2", para)  # 英文省略号
-    para = re.sub('(\…{2})([^，。！？\?”’》])', r"\1\n\2", para)  # 中文省略号
-    para = re.sub('([。！？\?][”’])([^，。！？\?”’》])', r'\1\n\2', para)
+    para = re.sub(r'([。！？?])([^，。！？?"\'》])', r"\1\n\2", para)
+    para = re.sub(r'(\.{6})([^，。！？?"\'》])', r"\1\n\2", para)
+    para = re.sub(r'(\…{2})([^，。！？?"\'》])', r"\1\n\2", para)
+    para = re.sub(r'([。！？?]["\'])([^，。！？?"\'》])', r'\1\n\2', para)
     # 如果双引号前有终止符，那么双引号才是句子的终点，把分句符\n放到双引号后，注意前面的几句都小心保留了双引号
     para = para.rstrip()  # 段尾如果有多余的\n就去掉它
     # 很多规则中会考虑分号;，但是这里我把它忽略不计，破折号、英文双引号等同样忽略，需要的再做些简单调整即可。
@@ -323,10 +331,10 @@ def _translate(summary, transcript, target_language='简体中文'):
             try:
                 api_params = get_api_params()
                 response = client.chat.completions.create(
-                    model=model_name,
+                    model=get_model_name(),
                     messages=messages,
                     timeout=240,
-                    extra_body=extra_body,
+                    extra_body=get_extra_body(),
                     **api_params
                 )
                 translation = response.choices[0].message.content.replace('\n', '')
@@ -339,7 +347,8 @@ def _translate(summary, transcript, target_language='简体中文'):
                 break
             except Exception as e:
                 logger.error(e)
-                if e == 'Internal Server Error':
+                error_msg = str(e)
+                if 'Internal Server Error' in error_msg:
                     client = OpenAI(
                         base_url=get_config('OPENAI_API_BASE', 'https://api.openai.com/v1'),
                         api_key=get_config('OPENAI_API_KEY')
@@ -394,6 +403,9 @@ def translate(folder, target_language='简体中文'):
     return True
 
 def translate_all_transcript_under_folder(folder, target_language):
+    if not os.path.isabs(folder):
+        folder = str(PROJECT_ROOT / folder)
+    logger.info(f'开始翻译: {folder}')
     found_video_dir = False
     for root, dirs, files in os.walk(folder):
         if 'download.info.json' not in files and 'transcript.json' not in files and 'translation.json' not in files:
@@ -407,7 +419,12 @@ def translate_all_transcript_under_folder(folder, target_language):
             continue
         translate(root, target_language)
     if not found_video_dir:
-        raise FileNotFoundError(f'在 {folder} 下未找到任何视频处理目录')
+        parent_contents = os.listdir(os.path.dirname(folder)) if os.path.exists(os.path.dirname(folder)) else []
+        raise FileNotFoundError(
+            f'在 {folder} 下未找到任何视频处理目录\n'
+            f'请确认该目录下存在包含 download.info.json 或 transcript.json 的子目录。\n'
+            f'父目录内容: {parent_contents}'
+        )
     return f'Translated all videos under {folder}'
 
 if __name__ == '__main__':

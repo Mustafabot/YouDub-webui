@@ -9,6 +9,7 @@ MODULES = {
         "dependencies": [],
         "input_files": [],
         "required_config": [],
+        "required_models": [],
         "requires_ffmpeg": True,
         "output_files": ["download.mp4", "download.info.json"],
         "function": "download_all_videos_under_folder",
@@ -22,6 +23,7 @@ MODULES = {
         "dependencies": ["video_download"],
         "input_files": ["download.mp4"],
         "required_config": [],
+        "required_models": ["demucs_htdemucs_ft"],
         "requires_ffmpeg": True,
         "output_files": ["audio_vocals.wav", "audio_instruments.wav"],
         "function": "separate_all_audio_under_folder",
@@ -35,7 +37,8 @@ MODULES = {
         "dependencies": ["audio_separation"],
         "input_files": ["audio_vocals.wav"],
         "required_config": ["HF_TOKEN"],
-        "requires_ffmpeg": False,
+        "required_models": ["whisper_large_v3", "whisper_align", "pyannote_segmentation"],
+        "requires_ffmpeg": True,
         "output_files": ["transcript.json"],
         "function": "transcribe_all_audio_under_folder",
         "module": "step020_whisperx",
@@ -48,6 +51,7 @@ MODULES = {
         "dependencies": ["speech_recognition"],
         "input_files": ["transcript.json", "download.info.json"],
         "required_config": ["OPENAI_API_KEY"],
+        "required_models": [],
         "requires_ffmpeg": False,
         "output_files": ["translation.json", "summary.json"],
         "function": "translate_all_transcript_under_folder",
@@ -61,6 +65,7 @@ MODULES = {
         "dependencies": ["translation"],
         "input_files": ["translation.json", "audio_vocals.wav", "audio_instruments.wav"],
         "required_config": ["BYTEDANCE_APPID", "BYTEDANCE_ACCESS_TOKEN"],
+        "required_models": ["pyannote_embedding", "f5_tts"],
         "requires_ffmpeg": False,
         "output_files": ["audio_combined.wav", "audio_tts.wav"],
         "function": "generate_all_wavs_under_folder",
@@ -74,6 +79,7 @@ MODULES = {
         "dependencies": ["tts"],
         "input_files": ["download.mp4", "audio_combined.wav", "translation.json"],
         "required_config": [],
+        "required_models": [],
         "requires_ffmpeg": True,
         "output_files": ["video.mp4"],
         "function": "synthesize_all_video_under_folder",
@@ -87,10 +93,11 @@ MODULES = {
         "dependencies": ["video_synthesis"],
         "input_files": ["summary.json", "download.info.json"],
         "required_config": [],
+        "required_models": [],
         "requires_ffmpeg": False,
         "output_files": ["video.txt", "video.png"],
         "function": "generate_all_info_under_folder",
-        "module": "step060_genrate_info",
+        "module": "step060_generate_info",
         "online_only": False,
     },
     "upload_bilibili": {
@@ -100,6 +107,7 @@ MODULES = {
         "dependencies": ["generate_info"],
         "input_files": ["video.mp4", "summary.json", "video.png"],
         "required_config": ["BILI_SESSDATA", "BILI_BILI_JCT"],
+        "required_models": [],
         "requires_ffmpeg": False,
         "output_files": ["bilibili.json"],
         "function": "upload_all_videos_under_folder",
@@ -111,12 +119,40 @@ MODULES = {
 
 def get_module(module_id):
     """获取模块信息"""
-    return MODULES.get(module_id)
+    module = MODULES.get(module_id)
+    if module is None:
+        return None
+    if module_id == "tts":
+        return _apply_tts_overrides(module)
+    return module
 
 
 def get_all_modules():
     """获取所有模块列表"""
-    return list(MODULES.values())
+    result = []
+    for module in MODULES.values():
+        if module["id"] == "tts":
+            result.append(_apply_tts_overrides(module))
+        else:
+            result.append(dict(module))
+    return result
+
+
+def _apply_tts_overrides(module):
+    """根据 F5-TTS 可用性动态调整 TTS 模块的配置需求和网络需求"""
+    module = dict(module)
+    try:
+        from .step043_tts_f5 import F5_AVAILABLE
+        if F5_AVAILABLE:
+            module["required_config"] = []
+            module["online_only"] = False
+        else:
+            module["required_config"] = ["BYTEDANCE_APPID", "BYTEDANCE_ACCESS_TOKEN"]
+            module["online_only"] = True
+    except ImportError:
+        module["required_config"] = ["BYTEDANCE_APPID", "BYTEDANCE_ACCESS_TOKEN"]
+        module["online_only"] = True
+    return module
 
 
 def get_module_ids():

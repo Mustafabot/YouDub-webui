@@ -6,7 +6,7 @@ import time
 
 from loguru import logger
 
-from .config import ensure_ffmpeg_available, get_ffmpeg_path
+from .config import ensure_ffmpeg_available, get_ffmpeg_path, PROJECT_ROOT
 
 
 def split_text(input_data,
@@ -26,7 +26,8 @@ def split_text(input_data,
         original_text = item["text"]
         sentence_start = 0
 
-        # Calculate the duration for each character
+        if not text:
+            continue
         duration_per_char = (item["end"] - item["start"]) / len(text)
         for i, char in enumerate(text):
             # If the character is a punctuation, split the sentence
@@ -167,6 +168,8 @@ def synthesize_video(folder, subtitles=True, speed_up=1.05, fps=30, resolution='
     
 
 def synthesize_all_video_under_folder(folder, subtitles=True, speed_up=1.05, fps=30, resolution='1080p'):
+    if not os.path.isabs(folder):
+        folder = str(PROJECT_ROOT / folder)
     found_video_dir = False
     for root, dirs, files in os.walk(folder):
         if 'download.mp4' not in files and 'video.mp4' not in files:

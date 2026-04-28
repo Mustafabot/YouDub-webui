@@ -1,4 +1,5 @@
 import os
+import re
 os.environ["GRADIO_SERVER_PORT"] = "19876"
 
 import warnings
@@ -6,17 +7,19 @@ warnings.filterwarnings("ignore", category=UserWarning, module="pyannote")
 
 import gradio as gr
 from youdub.step000_video_downloader import download_from_url, import_local_video
-from youdub.step010_demucs_vr import separate_all_audio_under_folder
-from youdub.step020_whisperx import transcribe_all_audio_under_folder
+from youdub.step010_demucs_vr import separate_all_audio_under_folder, cleanup_demucs
+from youdub.step020_whisperx import transcribe_all_audio_under_folder, cleanup_whisperx
 from youdub.step030_translation import translate_all_transcript_under_folder
 from youdub.step040_tts import generate_all_wavs_under_folder
 from youdub.step050_synthesize_video import synthesize_all_video_under_folder
-from youdub.step060_genrate_info import generate_all_info_under_folder
+from youdub.step060_generate_info import generate_all_info_under_folder
 from youdub.step070_upload_bilibili import upload_all_videos_under_folder
 from youdub.do_everything import do_everything
-from youdub.config import load_config, save_config, get_config_status, validate_config, DEFAULT_CONFIG, check_network, get_offline_capabilities
+from youdub.config import load_config, save_config, get_config_status, validate_config, DEFAULT_CONFIG, check_network, get_offline_capabilities, PROJECT_ROOT
 from youdub.module_registry import get_module, get_module_dependencies, get_execution_order, resolve_dependencies, MODULES, get_module_input_files
 from youdub.module_executor import get_module_with_info
+from youdub.model_manager import format_model_status, check_all_models_status, check_model_status, download_model, download_all_models, get_model_info
+from loguru import logger
 import shutil
 import json
 
@@ -105,6 +108,7 @@ def copy_selected_file_to_folder(src_file, dest_folder, target_filename):
         shutil.copy2(src_file, dest_path)
         return True, f"文件已复制到：{dest_path}"
     except Exception as e:
+        logger.error(f"复制文件失败: {e}")
         return False, f"复制文件失败：{str(e)}"
 
 
@@ -147,7 +151,7 @@ def format_selected_files_status(selected_files):
 
 
 def save_settings(openai_api_key, openai_api_base, model_name, temperature, top_p, max_tokens, extra_body,
-                  hf_token, hf_endpoint, bytedance_appid, bytedance_access_token, bili_sessdata, bili_bili_jct, bili_base64):
+                  hf_token, hf_endpoint, pip_index_url, bytedance_appid, bytedance_access_token, bili_sessdata, bili_bili_jct, bili_base64):
     config = {
         "OPENAI_API_KEY": openai_api_key,
         "OPENAI_API_BASE": openai_api_base,
@@ -158,6 +162,7 @@ def save_settings(openai_api_key, openai_api_base, model_name, temperature, top_
         "OPENAI_API_EXTRA_BODY": extra_body,
         "HF_TOKEN": hf_token,
         "HF_ENDPOINT": hf_endpoint,
+        "PIP_INDEX_URL": pip_index_url,
         "BYTEDANCE_APPID": bytedance_appid,
         "BYTEDANCE_ACCESS_TOKEN": bytedance_access_token,
         "BILI_SESSDATA": bili_sessdata,
@@ -178,9 +183,13 @@ def _format_status():
     status = get_config_status()
     lines = []
     for key, info in status.items():
-        if info["required"]:
+        if info["required"] and key != "MODELS":
             mark = "✅" if info["set"] else "❌"
             lines.append(f"{mark} {key} ({info['feature']})")
+    if "MODELS" in status:
+        model_info = status["MODELS"]
+        mark = "✅" if model_info["set"] else "⚠️"
+        lines.append(f"{mark} {model_info['message']} ({model_info['feature']})")
     return "\n".join(lines)
 
 
@@ -199,6 +208,43 @@ def _format_network_status():
     return "\n".join(lines)
 
 
+def _format_model_status_ui():
+    return format_model_status()
+
+
+def _download_all_missing_models(progress=gr.Progress()):
+    statuses = check_all_models_status()
+    missing = [mid for mid, s in statuses.items() if not s["downloaded"]]
+    if not missing:
+        return "所有模型已下载，无需额外操作"
+
+    lines = []
+    total = len(missing)
+    progress(0, desc="准备下载模型...")
+    for i, model_id in enumerate(missing):
+        info = get_model_info(model_id)
+        name = info["name"] if info else model_id
+        progress((i) / total, desc=f"[{i+1}/{total}] 正在下载: {name}")
+        try:
+            download_model(model_id)
+            lines.append(f"✅ [{i+1}/{total}] {name} 下载完成")
+        except ValueError as e:
+            lines.append(f"❌ [{i+1}/{total}] {name} 下载失败: {e}")
+        except ImportError as e:
+            lines.append(f"❌ [{i+1}/{total}] {name} 库未安装: {e}")
+        except Exception as e:
+            lines.append(f"❌ [{i+1}/{total}] {name} 下载失败: {str(e)}")
+    success = sum(1 for l in lines if l.startswith("✅"))
+    fail = sum(1 for l in lines if l.startswith("❌"))
+    lines.append(f"\n下载完成：成功 {success} 个，失败 {fail} 个")
+    progress(1.0, desc="下载完成")
+    return "\n".join(lines)
+
+
+def _refresh_model_status():
+    return format_model_status()
+
+
 def _format_error(desc, causes, suggestions):
     lines = [f"❌ 操作失败：{desc}", "", "可能的原因："]
     for c in causes:
@@ -213,16 +259,35 @@ def _format_error(desc, causes, suggestions):
 def _classify_error(e):
     msg = str(e).lower()
     if any(kw in msg for kw in ['connection', 'network', 'timeout', 'urlopen', 'http', 'ssl']):
+        if not check_network():
+            return _format_error(
+                "离线模式下模型加载失败",
+                ["当前处于离线模式，无法从网络下载模型或检查更新", "模型可能未完整下载到本地缓存", "模型缓存路径与加载路径不匹配"],
+                ["请先连接网络并在「模型管理」中下载所有必要模型", "确认模型状态显示为全部已下载", "如问题持续，尝试删除模型缓存后重新下载"]
+            )
         return _format_error(
             "网络连接错误",
             ["网络连接不稳定或无法访问目标服务器", "代理设置不正确", "目标服务器暂时不可用"],
             ["检查网络连接是否正常", "如使用代理，请确认代理设置正确", "稍后重试"]
         )
-    if any(kw in msg for kw in ['cuda', 'out of memory', 'oom']):
+    cuda_oom_patterns = [
+        r'cuda.*out of memory',
+        r'out of memory.*cuda',
+        r'cudnn_status_alloc_failed',
+        r'cuda.*alloc.*failed',
+        r'alloc.*failed.*cuda'
+    ]
+    if any(re.search(p, msg) for p in cuda_oom_patterns) or ('oom' in msg and 'cuda' in msg):
         return _format_error(
             "CUDA 显存不足",
-            ["GPU 显存不足以运行当前模型", "模型过大或批处理大小过大"],
-            ["在设置中选择更小的模型", "减小批处理大小（Batch Size）", "将计算设备切换为 CPU 模式", "关闭其他占用 GPU 的程序"]
+            ["GPU 显存不足以运行当前模型", "模型过大或批处理大小过大", "显存碎片化导致即使显存足够也可能分配失败", "上一个步骤的模型未释放显存"],
+            ["在设置中选择更小的模型（如 medium 或 small）", "减小批处理大小（Batch Size），建议从 8 开始测试", "将计算设备切换为 CPU 模式", "关闭其他占用 GPU 程序（如浏览器、游戏）", "重启程序以完全重置显存状态"]
+        )
+    if 'out of memory' in msg or 'oom' in msg:
+        return _format_error(
+            "系统内存不足",
+            ["系统内存不足以运行当前任务", "同时运行的程序过多"],
+            ["关闭其他占用内存的程序", "减小模型或批处理大小", "增加系统虚拟内存"]
         )
     if any(kw in msg for kw in ['api key', 'api_key', 'unauthorized', 'invalid api', 'authentication', '401', '403']):
         return _format_error(
@@ -236,11 +301,35 @@ def _classify_error(e):
             ["指定的文件夹路径不正确", "文件已被移动或删除"],
             ["检查输入的路径是否正确", "确认文件是否存在于指定位置"]
         )
+    if 'winerror 2' in msg:
+        return _format_error(
+            "系统找不到指定的可执行文件",
+            ["FFmpeg 可能未安装或不在系统 PATH 中", "依赖的外部工具（如 ffmpeg）未找到"],
+            ["运行 python scripts/download_ffmpeg.py 自动下载安装 FFmpeg", "检查配置中的 FFMPEG_PATH 是否正确设置", "查看控制台日志获取详细错误信息"]
+        )
+    if any(kw in msg for kw in ['numba needs numpy', 'numba.*numpy', 'numpy.*numba']):
+        return _format_error(
+            "依赖库版本不兼容",
+            ["Numba 与 NumPy 版本不兼容", "NumPy 版本过高，超出 Numba 支持范围", "通常由 pip 自动升级导致"],
+            [
+                "在终端执行修复命令：pip install \"numpy<2.4\" \"numba>=0.63\"",
+                "或升级 Numba：pip install \"numba>=0.64\"",
+                "如问题持续，删除 venv 后重新运行 setup_windows.bat"
+            ]
+        )
     return _format_error(
         f"发生未知错误：{str(e)}",
         ["程序运行过程中遇到了未预期的错误"],
         ["查看控制台日志获取详细错误信息", "检查所有配置是否正确", "如问题持续，请提交 Issue 反馈"]
     )
+
+
+def resolve_folder_path(folder):
+    """将相对路径转换为基于项目根目录的绝对路径"""
+    if not folder or os.path.isabs(folder):
+        return folder
+    resolved = str(PROJECT_ROOT / folder)
+    return resolved
 
 
 def do_everything_wrapper(input_mode, url, local_files, root_folder, num_videos, resolution, translation_target_language, subtitles, auto_upload_video,
@@ -315,6 +404,7 @@ def do_everything_wrapper(input_mode, url, local_files, root_folder, num_videos,
             output = "\n".join(offline_warnings) + output
         return output
     except Exception as e:
+        logger.error(f"全自动流程执行失败: {e}")
         return _classify_error(e)
 
 
@@ -325,6 +415,7 @@ def demucs_wrapper(folder, model, device, progress, shifts):
             ["文件夹路径为空"],
             ["请输入有效的文件夹路径"]
         )
+    folder = resolve_folder_path(folder)
     if not os.path.exists(folder):
         return _format_error(
             f"文件夹不存在：{folder}",
@@ -337,6 +428,8 @@ def demucs_wrapper(folder, model, device, progress, shifts):
         )
         return f"✅ {result}" if result and not str(result).startswith("❌") else result
     except Exception as e:
+        logger.error(f"人声分离失败: {e}")
+        cleanup_demucs()
         return _classify_error(e)
 
 
@@ -347,6 +440,7 @@ def whisper_wrapper(folder, model, diarization, download_root, device, batch_siz
             ["文件夹路径为空"],
             ["请输入有效的文件夹路径"]
         )
+    folder = resolve_folder_path(folder)
     if not os.path.exists(folder):
         return _format_error(
             f"文件夹不存在：{folder}",
@@ -361,6 +455,8 @@ def whisper_wrapper(folder, model, diarization, download_root, device, batch_siz
         )
         return f"✅ {result}" if result and not str(result).startswith("❌") else result
     except Exception as e:
+        logger.error(f"语音识别失败: {e}")
+        cleanup_whisperx()
         return _classify_error(e)
 
 
@@ -371,6 +467,7 @@ def synthesize_wrapper(folder, subtitles, resolution, speed_up, fps):
             ["文件夹路径为空"],
             ["请输入有效的文件夹路径"]
         )
+    folder = resolve_folder_path(folder)
     if not os.path.exists(folder):
         return _format_error(
             f"文件夹不存在：{folder}",
@@ -383,6 +480,7 @@ def synthesize_wrapper(folder, subtitles, resolution, speed_up, fps):
         )
         return f"✅ {result}" if result and not str(result).startswith("❌") else result
     except Exception as e:
+        logger.error(f"视频合成失败: {e}")
         return _classify_error(e)
 
 
@@ -411,7 +509,8 @@ def format_execution_order(selected_modules):
                     input_info = f"（需要: {', '.join(module['input_files'])}）"
                 lines.append(f"  {i}. {module['name']}{input_info}")
         return "\n".join(lines)
-    except:
+    except Exception as e:
+        logger.error(f"格式化模块执行顺序失败: {e}")
         return "模块选择无效"
 
 
@@ -458,7 +557,7 @@ tts_interface = gr.Interface(
     inputs=[
         gr.Textbox(label='Folder', value='videos'),
         gr.Checkbox(label='Force Bytedance', value=False,
-                    info='强制使用火山引擎 TTS，而非 XTTS 声音克隆'),
+                    info='强制使用火山引擎 TTS，而非 F5-TTS 声音克隆'),
     ],
     outputs='text',
 )
@@ -523,6 +622,9 @@ with gr.Blocks(title='YouDub') as app:
                 hf_endpoint = gr.Textbox(label='HuggingFace Endpoint',
                     value=_cfg.get('HF_ENDPOINT', ''),
                     info='例如：https://hf-mirror.com，用于加速模型下载')
+                pip_index_url = gr.Textbox(label='PyPI 镜像源',
+                    value=_cfg.get('PIP_INDEX_URL', ''),
+                    info='例如：https://pypi.tuna.tsinghua.edu.cn/simple，用于加速 Python 包安装')
             with gr.Accordion("语音合成", open=True):
                 bytedance_appid = gr.Textbox(label='Bytedance App ID *',
                     value=_cfg.get('BYTEDANCE_APPID', ''),
@@ -540,11 +642,36 @@ with gr.Blocks(title='YouDub') as app:
                 bili_base64 = gr.Textbox(label='BiliBili Cover Base64',
                     value=_cfg.get('BILI_BASE64', ''),
                     info='B站视频封面的 Base64 编码，可选')
+            with gr.Accordion("模型管理", open=True):
+                gr.Markdown(
+                    "管理 YouDub 全流程所需的本地 AI 模型。首次使用前请先下载所需模型。\n\n"
+                    "需要 HF_TOKEN 的模型需先在「翻译服务」中设置 HuggingFace Token。\n\n"
+                    "如需使用镜像加速，请在「翻译服务」中设置 HuggingFace Endpoint（例如 https://hf-mirror.com），保存后再下载模型。"
+                )
+                model_status_display = gr.Textbox(label="模型状态", value=_format_model_status_ui(), interactive=False, lines=12)
+                with gr.Row():
+                    refresh_model_btn = gr.Button("🔄 刷新模型状态", variant="secondary")
+                    download_all_btn = gr.Button("⬇️ 下载全部缺失模型", variant="primary")
+                download_result = gr.Textbox(label="下载结果")
+                refresh_model_btn.click(
+                    fn=_refresh_model_status,
+                    inputs=[],
+                    outputs=[model_status_display]
+                )
+                download_all_btn.click(
+                    fn=_download_all_missing_models,
+                    inputs=[],
+                    outputs=[download_result]
+                ).then(
+                    fn=_refresh_model_status,
+                    inputs=[],
+                    outputs=[model_status_display]
+                )
             save_btn = gr.Button("保存配置", variant="primary")
             save_btn.click(
                 fn=save_settings,
                 inputs=[openai_api_key, openai_api_base, model_name, temperature, top_p, max_tokens, extra_body,
-                        hf_token, hf_endpoint, bytedance_appid, bytedance_access_token, bili_sessdata, bili_bili_jct, bili_base64],
+                        hf_token, hf_endpoint, pip_index_url, bytedance_appid, bytedance_access_token, bili_sessdata, bili_bili_jct, bili_base64],
                 outputs=[save_result, status_display]
             )
         with gr.Tab('全自动'):
@@ -702,7 +829,7 @@ with gr.Blocks(title='YouDub') as app:
                 de_max_retries = gr.Slider(minimum=1, maximum=10, step=1, label='Max Retries', value=3,
                           info='失败后的最大重试次数')
                 de_force_bytedance = gr.Checkbox(label='Force Bytedance', value=True,
-                             info='强制使用火山引擎 TTS，而非 XTTS 声音克隆')
+                             info='强制使用火山引擎 TTS，而非 F5-TTS 声音克隆')
             de_output = gr.Textbox(label='输出')
             de_btn = gr.Button("开始执行", variant="primary")
             
@@ -828,5 +955,38 @@ with gr.Blocks(title='YouDub') as app:
             gr.Markdown("将合成好的视频上传到 Bilibili")
             upload_bilibili_interface.render()
 
+def _check_dependency_compatibility():
+    try:
+        import numba
+        import numpy
+        nv = tuple(int(x) for x in numba.__version__.split('.')[:2])
+        npv = tuple(int(x) for x in numpy.__version__.split('.')[:2])
+        max_np = {
+            (0, 60): (2, 0), (0, 61): (2, 1), (0, 62): (2, 1),
+            (0, 63): (2, 3), (0, 64): (2, 4), (0, 65): (2, 4),
+        }.get(nv, (2, 0))
+        if npv > max_np:
+            msg = (
+                f"Numba {numba.__version__} 不支持 NumPy {numpy.__version__}，"
+                f"最高支持 NumPy {'.'.join(map(str, max_np))}\n"
+                f"修复命令: pip install \"numpy<{'.'.join(map(str, max_np))}\" \"numba>=0.63\""
+            )
+            logger.error(msg)
+            logger.error(f"\n{'='*60}")
+            logger.error(f"  ❌ 依赖库版本不兼容")
+            logger.error(f"  {msg}")
+            logger.error(f"{'='*60}\n")
+            return False
+        logger.info(f"依赖库版本检查通过: Numba {numba.__version__} + NumPy {numpy.__version__}")
+        return True
+    except ImportError:
+        logger.warning("无法检查 Numba/NumPy 版本兼容性（可能未安装）")
+        return True
+    except Exception as e:
+        logger.debug(f"版本兼容性检查异常: {e}")
+        return True
+
+
 if __name__ == '__main__':
+    _check_dependency_compatibility()
     app.launch(server_port=19876)
