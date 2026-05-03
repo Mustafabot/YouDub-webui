@@ -130,6 +130,39 @@ def upload_all_videos_under_folder(folder):
         raise FileNotFoundError(f'在 {folder} 下未找到任何视频处理目录')
     return f'All videos under {folder} uploaded.'
 
+def upload_videos_in_folders(folder_list):
+    """处理指定目录列表中的视频上传
+
+    Args:
+        folder_list: 需要处理的目录路径列表
+    """
+    if isinstance(folder_list, str):
+        folder_list = [folder_list]
+    success_list = []
+    fail_list = []
+    for subdir in folder_list:
+        subdir = os.path.abspath(subdir)
+        files = os.listdir(subdir) if os.path.exists(subdir) else []
+        if 'video.mp4' not in files:
+            fail_list.append(f"{subdir}: 缺少 video.mp4")
+            continue
+        if os.path.exists(os.path.join(subdir, 'bilibili.json')):
+            with open(os.path.join(subdir, 'bilibili.json'), 'r', encoding='utf-8') as f:
+                bilibili_info = json.load(f)
+            if bilibili_info['results'][0]['code'] == 0:
+                logger.info(f'Video already uploaded: {subdir}')
+                success_list.append(subdir)
+                continue
+        try:
+            upload_video(subdir)
+            success_list.append(subdir)
+        except Exception as e:
+            logger.error(f'Error uploading video in {subdir}: {e}')
+            fail_list.append(f"{subdir}: {e}")
+    logger.info(f'上传完成: 成功 {len(success_list)}/{len(folder_list)}, 失败 {len(fail_list)}')
+    return f'成功: {len(success_list)}\n失败: {len(fail_list)}'
+
+
 if __name__ == '__main__':
     
     # Example usage

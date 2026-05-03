@@ -6,7 +6,42 @@ import time
 
 from loguru import logger
 
-from .config import ensure_ffmpeg_available, get_ffmpeg_path, PROJECT_ROOT
+from .config import ensure_ffmpeg_available, get_ffmpeg_path, get_ffprobe_path, PROJECT_ROOT
+
+_video_encoder_cache = {"name": None}
+
+
+def get_available_video_encoder():
+    if _video_encoder_cache["name"] is not None:
+        return _video_encoder_cache["name"]
+
+    ffmpeg_path = get_ffmpeg_path()
+    if not ffmpeg_path:
+        return None
+
+    try:
+        result = subprocess.run(
+            [ffmpeg_path, '-encoders'],
+            capture_output=True, text=True, timeout=10
+        )
+        output = result.stdout + result.stderr
+    except Exception:
+        return None
+
+    preference_order = [
+        'libx264',
+        'h264_nvenc',
+        'h264_amf',
+        'h264_qsv',
+        'libopenh264',
+    ]
+
+    for encoder in preference_order:
+        if f' {encoder} ' in output or f'\t{encoder}\t' in output or f' {encoder}\t' in output:
+            _video_encoder_cache["name"] = encoder
+            return encoder
+
+    return None
 
 
 def split_text(input_data,
@@ -79,7 +114,10 @@ def generate_srt(translation, srt_path, speed_up=1, max_line_char=30):
 
 
 def get_aspect_ratio(video_path):
-    command = ['ffprobe', '-v', 'error', '-select_streams', 'v:0',
+    ffprobe_path = get_ffprobe_path()
+    if not ffprobe_path:
+        raise RuntimeError("FFprobe 未找到，无法获取视频信息。请运行自动下载或在配置中设置 FFMPEG_PATH")
+    command = [ffprobe_path, '-v', 'error', '-select_streams', 'v:0',
                '-show_entries', 'stream=width,height', '-of', 'json', video_path]
     result = subprocess.run(command, capture_output=True, text=True)
     dimensions = json.loads(result.stdout)['streams'][0]
@@ -100,7 +138,7 @@ def convert_resolution(aspect_ratio, resolution='1080p'):
     # return f'{width}x{height}'
     return width, height
     
-def synthesize_video(folder, subtitles=True, speed_up=1.05, fps=30, resolution='1080p'):
+def synthesize_video(folder, subtitles=True, use_original_audio=False, speed_up=1.05, fps=30, resolution='1080p'):
     ffmpeg_available, ffmpeg_msg = ensure_ffmpeg_available(auto_download=True)
     if not ffmpeg_available:
         raise RuntimeError(
@@ -124,7 +162,7 @@ def synthesize_video(folder, subtitles=True, speed_up=1.05, fps=30, resolution='
         raise FileNotFoundError(f'视频文件不存在: {input_video}，请确认下载步骤已正确执行')
     if not os.path.exists(translation_path):
         raise FileNotFoundError(f'翻译文件不存在: {translation_path}，请确认翻译步骤已正确执行')
-    if not os.path.exists(input_audio):
+    if not use_original_audio and not os.path.exists(input_audio):
         raise FileNotFoundError(f'合成音频不存在: {input_audio}，请确认TTS步骤已正确执行')
     
     with open(translation_path, 'r', encoding='utf-8') as f:
@@ -134,6 +172,7 @@ def synthesize_video(folder, subtitles=True, speed_up=1.05, fps=30, resolution='
     output_video = os.path.join(folder, 'video.mp4')
     generate_srt(translation, srt_path, speed_up)
     srt_path = srt_path.replace('\\', '/')
+    srt_path = srt_path.replace(':', '\\:')
     aspect_ratio = get_aspect_ratio(input_video)
     width, height = convert_resolution(aspect_ratio, resolution)
     resolution = f'{width}x{height}'
@@ -141,33 +180,51 @@ def synthesize_video(folder, subtitles=True, speed_up=1.05, fps=30, resolution='
     outline = int(round(font_size/8))
     video_speed_filter = f"setpts=PTS/{speed_up}"
     audio_speed_filter = f"atempo={speed_up}"
-    subtitle_filter = f"subtitles={srt_path}:force_style='FontName=Arial,FontSize={font_size},PrimaryColour=&HFFFFFF,OutlineColour=&H000000,Outline={outline},WrapStyle=2'"
+    subtitle_filter = f"subtitles=filename='{srt_path}':force_style='FontName=Arial,FontSize={font_size},PrimaryColour=&HFFFFFF,OutlineColour=&H000000,Outline={outline},WrapStyle=2'"
     
+    audio_stream = '0:a' if use_original_audio else '1:a'
     if subtitles:
-        filter_complex = f"[0:v]{video_speed_filter},{subtitle_filter}[v];[1:a]{audio_speed_filter}[a]"
+        filter_complex = f"[0:v]{video_speed_filter},{subtitle_filter}[v];[{audio_stream}]{audio_speed_filter}[a]"
     else:
-        filter_complex = f"[0:v]{video_speed_filter}[v];[1:a]{audio_speed_filter}[a]"
+        filter_complex = f"[0:v]{video_speed_filter}[v];[{audio_stream}]{audio_speed_filter}[a]"
     
     ffmpeg_path = get_ffmpeg_path()
+    video_encoder = get_available_video_encoder()
+    if not video_encoder:
+        raise RuntimeError(
+            '未找到可用的 H.264 视频编码器。当前 FFmpeg 版本可能不支持 libx264/libopenh264/NVENC/AMF/QSV。\n'
+            '请安装包含 H.264 编码支持的 FFmpeg 版本。'
+        )
+    if video_encoder != 'libx264':
+        logger.info(f'使用视频编码器: {video_encoder} (libx264 不可用)')
     ffmpeg_command = [
         ffmpeg_path,
         '-i', input_video,
-        '-i', input_audio,
+    ]
+    if not use_original_audio:
+        ffmpeg_command.extend(['-i', input_audio])
+    ffmpeg_command.extend([
         '-filter_complex', filter_complex,
         '-map', '[v]',
         '-map', '[a]',
         '-r', str(fps),
         '-s', resolution,
-        '-c:v', 'libx264',
+        '-c:v', video_encoder,
         '-c:a', 'aac',
         output_video,
         '-y'
-    ]
-    subprocess.run(ffmpeg_command)
+    ])
+    result = subprocess.run(ffmpeg_command, capture_output=True, text=True)
+    if result.returncode != 0:
+        logger.error(f'FFmpeg 视频合成失败 (返回码 {result.returncode}):')
+        for line in result.stderr.strip().split('\n'):
+            if line.strip():
+                logger.error(f'  {line.strip()}')
+        raise RuntimeError(f'FFmpeg 视频合成失败，返回码: {result.returncode}')
     time.sleep(1)
     
 
-def synthesize_all_video_under_folder(folder, subtitles=True, speed_up=1.05, fps=30, resolution='1080p'):
+def synthesize_all_video_under_folder(folder, subtitles=True, use_original_audio=False, speed_up=1.05, fps=30, resolution='1080p'):
     if not os.path.isabs(folder):
         folder = str(PROJECT_ROOT / folder)
     found_video_dir = False
@@ -181,11 +238,47 @@ def synthesize_all_video_under_folder(folder, subtitles=True, speed_up=1.05, fps
             )
         if 'video.mp4' in files:
             continue
-        synthesize_video(root, subtitles=subtitles,
+        synthesize_video(root, subtitles=subtitles, use_original_audio=use_original_audio,
                          speed_up=speed_up, fps=fps, resolution=resolution)
     if not found_video_dir:
         raise FileNotFoundError(f'在 {folder} 下未找到任何视频处理目录')
     return f'Synthesized all videos under {folder}'
+def synthesize_video_in_folders(folder_list, subtitles=True, use_original_audio=False, speed_up=1.05, fps=30, resolution='1080p'):
+    """处理指定目录列表中的视频合成
+
+    Args:
+        folder_list: 需要处理的目录路径列表
+        subtitles: 是否添加字幕
+        use_original_audio: 是否使用原视频音轨
+        speed_up: 加速倍率
+        fps: 帧率
+        resolution: 分辨率
+    """
+    if isinstance(folder_list, str):
+        folder_list = [folder_list]
+    success_list = []
+    fail_list = []
+    for subdir in folder_list:
+        subdir = os.path.abspath(subdir)
+        files = os.listdir(subdir) if os.path.exists(subdir) else []
+        if 'download.mp4' not in files:
+            fail_list.append(f"{subdir}: 缺少 download.mp4")
+            continue
+        if 'video.mp4' in files:
+            logger.info(f'Video already synthesized in {subdir}')
+            success_list.append(subdir)
+            continue
+        try:
+            synthesize_video(subdir, subtitles=subtitles, use_original_audio=use_original_audio,
+                             speed_up=speed_up, fps=fps, resolution=resolution)
+            success_list.append(subdir)
+        except Exception as e:
+            logger.error(f'Error synthesizing video in {subdir}: {e}')
+            fail_list.append(f"{subdir}: {e}")
+    logger.info(f'视频合成完成: 成功 {len(success_list)}/{len(folder_list)}, 失败 {len(fail_list)}')
+    return f'成功: {len(success_list)}\n失败: {len(fail_list)}'
+
+
 if __name__ == '__main__':
     folder = r'videos\3Blue1Brown\20231207 Im still astounded this is true'
     synthesize_all_video_under_folder(folder, subtitles=True)

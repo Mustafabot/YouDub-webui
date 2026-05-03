@@ -83,10 +83,11 @@ def load_model(device='auto', model_size='auto', nfe_step=None):
 
     if config['device'] == 'cuda':
         try:
-            model.model = model.model.half()
+            model.ema_model = model.ema_model.half()
             logger.info('F5-TTS 模型已转换为 FP16 精度')
         except Exception as e:
-            logger.warning(f'FP16 转换失败，使用默认精度: {e}')
+            model.ema_model = model.ema_model.float()
+            logger.warning(f'FP16 转换失败，已回退到 FP32 精度: {e}')
 
     t_end = time.time()
     logger.info(f'F5-TTS 模型加载完成，耗时 {t_end - t_start:.2f}s')

@@ -15,6 +15,19 @@ def get_model_name():
 
 logger.info(f'using model {get_model_name()}')
 
+DEFAULT_SUMMARY_SYSTEM_PROMPT = 'You are a expert in the field of this video. Please detailedly summarize the video in JSON format.\n```json\n{{"title": "the title of the video", "summary", "the summary of the video"}}\n```'
+
+DEFAULT_SUMMARY_TRANSLATION_PROMPT = 'You are a native speaker of {target_language}. Please translate the title and summary into {target_language} in JSON format. ```json\n{{"title": "the {target_language} title of the video", "summary", "the {target_language} summary of the video", "tags": [list of tags in {target_language}]}}\n```.'
+
+DEFAULT_TRANSLATION_SYSTEM_PROMPT = 'You are a expert in the field of this video.\n{info}\nTranslate the sentence into {target_language}.下面我让你来充当翻译家，你的目标是把任何语言翻译成中文，请翻译时不要带翻译腔，而是要翻译得自然、流畅和地道，使用优美和高雅的表达方式。请将人工智能的"agent"翻译为"智能体"，强化学习中是`Q-Learning`而不是`Queue Learning`。数学公式写成plain text，不要使用latex。确保翻译正确和简洁。注意信达雅。'
+
+DEFAULT_TRANSLATION_FEWSHOT = [
+    {'role': 'user', 'content': '使用地道的中文Translate:"Knowledge is power."'},
+    {'role': 'assistant', 'content': '翻译："知识就是力量。"'},
+    {'role': 'user', 'content': '使用地道的中文Translate:"To be or not to be, that is the question."'},
+    {'role': 'assistant', 'content': '翻译："生存还是毁灭，这是一个值得考虑的问题。"'},
+]
+
 def get_api_params():
     params = {}
     
@@ -69,6 +82,29 @@ def get_extra_body():
     return build_extra_body()
 
 
+def get_custom_prompt(key, default_value):
+    value = get_config(key, '')
+    if value and str(value).strip():
+        return value
+    return default_value
+
+
+def get_custom_fewshot():
+    value = get_config('TRANSLATION_FEWSHOT_EXAMPLES', '')
+    if value and str(value).strip():
+        try:
+            examples = json.loads(value)
+            if isinstance(examples, list) and len(examples) > 0:
+                for ex in examples:
+                    if 'role' not in ex or 'content' not in ex:
+                        logger.warning(f'自定义 few-shot 示例格式无效，使用默认')
+                        return DEFAULT_TRANSLATION_FEWSHOT
+                return examples
+        except json.JSONDecodeError as e:
+            logger.warning(f'自定义 few-shot 示例 JSON 解析失败: {e}，使用默认')
+    return DEFAULT_TRANSLATION_FEWSHOT
+
+
 def get_necessary_info(info: dict):
     return {
         'title': info['title'],
@@ -98,9 +134,9 @@ def summarize(info, transcript, target_language='简体中文'):
     
     full_description = f'The following is the full content of the video:\n{info_message}\n{transcript}\n{info_message}\nAccording to the above content, detailedly Summarize the video in JSON format:\n```json\n{{"title": "", "summary": ""}}\n```'
     
+    summary_prompt = get_custom_prompt('SUMMARY_SYSTEM_PROMPT', DEFAULT_SUMMARY_SYSTEM_PROMPT)
     messages = [
-        {'role': 'system',
-            'content': f'You are a expert in the field of this video. Please detailedly summarize the video in JSON format.\n```json\n{{"title": "the title of the video", "summary", "the summary of the video"}}\n```'},
+        {'role': 'system', 'content': summary_prompt},
         {'role': 'user', 'content': full_description},
     ]
     retry_message=''
@@ -108,7 +144,7 @@ def summarize(info, transcript, target_language='简体中文'):
     for retry in range(5):
         try:
             messages = [
-                {'role': 'system', 'content': f'You are a expert in the field of this video. Please summarize the video in JSON format.\n```json\n{{"title": "the title of the video", "summary", "the summary of the video"}}\n```'},
+                {'role': 'system', 'content': summary_prompt},
                 {'role': 'user', 'content': full_description+retry_message},
             ]
             api_params = get_api_params()
@@ -143,9 +179,10 @@ def summarize(info, transcript, target_language='简体中文'):
     title = summary['title']
     summary = summary['summary']
     tags = info['tags']
+    summary_trans_prompt = get_custom_prompt('SUMMARY_TRANSLATION_PROMPT', DEFAULT_SUMMARY_TRANSLATION_PROMPT)
+    summary_trans_prompt = summary_trans_prompt.format(target_language=target_language)
     messages = [
-        {'role': 'system',
-            'content': f'You are a native speaker of {target_language}. Please translate the title and summary into {target_language} in JSON format. ```json\n{{"title": "the {target_language} title of the video", "summary", "the {target_language} summary of the video", "tags": [list of tags in {target_language}]}}\n```.'},
+        {'role': 'system', 'content': summary_trans_prompt},
         {'role': 'user',
             'content': f'The title of the video is "{title}". The summary of the video is "{summary}". Tags: {tags}.\nPlease translate the above title and summary and tags into {target_language} in JSON format. ```json\n{{"title": "", "summary", ""， "tags": []}}\n```. Remember to tranlate the title and the summary and tags into {target_language} in JSON.'},
     ]
@@ -310,12 +347,12 @@ def _translate(summary, transcript, target_language='简体中文'):
     )
     info = f'This is a video called "{summary["title"]}". {summary["summary"]}.'
     full_translation = []
+    system_prompt = get_custom_prompt('TRANSLATION_SYSTEM_PROMPT', DEFAULT_TRANSLATION_SYSTEM_PROMPT)
+    system_prompt = system_prompt.format(info=info, target_language=target_language)
+    fewshot = get_custom_fewshot()
     fixed_message = [
-        {'role': 'system', 'content': f'You are a expert in the field of this video.\n{info}\nTranslate the sentence into {target_language}.下面我让你来充当翻译家，你的目标是把任何语言翻译成中文，请翻译时不要带翻译腔，而是要翻译得自然、流畅和地道，使用优美和高雅的表达方式。请将人工智能的“agent”翻译为“智能体”，强化学习中是`Q-Learning`而不是`Queue Learning`。数学公式写成plain text，不要使用latex。确保翻译正确和简洁。注意信达雅。'},
-        {'role': 'user', 'content': '使用地道的中文Translate:"Knowledge is power."'},
-        {'role': 'assistant', 'content': '翻译：“知识就是力量。”'},
-        {'role': 'user', 'content': '使用地道的中文Translate:"To be or not to be, that is the question."'},
-        {'role': 'assistant', 'content': '翻译：“生存还是毁灭，这是一个值得考虑的问题。”'},]
+        {'role': 'system', 'content': system_prompt},
+    ] + fewshot
     
     history = []
     for line in transcript:
@@ -426,6 +463,37 @@ def translate_all_transcript_under_folder(folder, target_language):
             f'父目录内容: {parent_contents}'
         )
     return f'Translated all videos under {folder}'
+
+def translate_transcripts_in_folders(folder_list, target_language='简体中文'):
+    """处理指定目录列表中的字幕翻译
+
+    Args:
+        folder_list: 需要处理的目录路径列表
+        target_language: 目标语言
+    """
+    if isinstance(folder_list, str):
+        folder_list = [folder_list]
+    success_list = []
+    fail_list = []
+    for subdir in folder_list:
+        subdir = os.path.abspath(subdir)
+        files = os.listdir(subdir) if os.path.exists(subdir) else []
+        if 'transcript.json' not in files:
+            fail_list.append(f"{subdir}: 缺少 transcript.json")
+            continue
+        if 'translation.json' in files:
+            logger.info(f'Translation already exists in {subdir}')
+            success_list.append(subdir)
+            continue
+        try:
+            translate(subdir, target_language)
+            success_list.append(subdir)
+        except Exception as e:
+            logger.error(f'Error translating in {subdir}: {e}')
+            fail_list.append(f"{subdir}: {e}")
+    logger.info(f'翻译完成: 成功 {len(success_list)}/{len(folder_list)}, 失败 {len(fail_list)}')
+    return f'成功: {len(success_list)}\n失败: {len(fail_list)}'
+
 
 if __name__ == '__main__':
     translate_all_transcript_under_folder(

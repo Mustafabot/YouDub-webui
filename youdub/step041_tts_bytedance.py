@@ -16,7 +16,7 @@ from loguru import logger
 from pyannote.audio import Model, Inference
 from scipy.spatial.distance import cosine
 
-from .config import get_config
+from .config import get_config, get_hf_local_files_only
 
 host = "openspeech.bytedance.com"
 api_url = f"https://{host}/api/v1/tts"
@@ -54,23 +54,61 @@ def get_request_json(voice_type='BV001_streaming'):
 
 embedding_model = None
 embedding_inference = None
-try:
+
+def load_embedding_model():
+    global embedding_model, embedding_inference
+    if embedding_model is not None:
+        return True
+    
+    local_files_only = get_hf_local_files_only()
     hf_token = get_config('HF_TOKEN')
-    if hf_token:
-        loaded_model = Model.from_pretrained(
-            "pyannote/embedding", use_auth_token=hf_token)
+    
+    try:
+        if local_files_only:
+            logger.info('离线模式：尝试从本地缓存加载 pyannote/embedding 模型')
+            loaded_model = Model.from_pretrained(
+                "pyannote/embedding", 
+                token=hf_token if hf_token else None,
+                local_files_only=True
+            )
+        else:
+            if not hf_token:
+                logger.warning("HF_TOKEN 未配置，无法下载 pyannote/embedding 模型")
+                logger.warning("如需下载模型，请在配置中设置 HF_TOKEN")
+                return False
+            logger.info('正在加载 pyannote/embedding 模型...')
+            loaded_model = Model.from_pretrained(
+                "pyannote/embedding", 
+                token=hf_token
+            )
+        
         if loaded_model is not None:
             embedding_model = loaded_model
             embedding_inference = Inference(
                 embedding_model, window="whole")
-            logger.info("pyannote/embedding model loaded successfully")
+            logger.info("pyannote/embedding 模型加载成功")
+            return True
         else:
-            logger.warning("pyannote/embedding model returned None (token may be invalid or model is gated)")
-    else:
-        logger.warning("HF_TOKEN not set, embedding model will not be loaded")
-except Exception as e:
-    logger.warning(f"Failed to load pyannote/embedding model: {e}")
-    logger.warning("Speaker embedding functionality will be disabled")
+            logger.warning("pyannote/embedding 模型加载失败（返回 None）")
+            return False
+    except Exception as e:
+        error_msg = str(e)
+        if "401" in error_msg or "gated" in error_msg or "authenticated" in error_msg:
+            logger.warning(f"pyannote/embedding 模型访问被拒绝 (401 Unauthorized)")
+            logger.warning("请按以下步骤操作：")
+            logger.warning("1. 访问 https://huggingface.co/pyannote/embedding")
+            logger.warning("2. 登录 Hugging Face 账号")
+            logger.warning("3. 点击 'Access repository' 接受使用条款")
+            logger.warning("4. 确保 HF_TOKEN 有效且对应该账号")
+        elif "local_files_only" in error_msg or "Offline" in error_msg:
+            logger.warning(f"本地缓存中未找到 pyannote/embedding 模型")
+            logger.warning("请先连接网络并配置有效 HF_TOKEN 下载模型，下载后可离线使用")
+        else:
+            logger.warning(f"加载 pyannote/embedding 模型失败: {e}")
+        logger.warning("说话者音色匹配功能将被禁用")
+        return False
+
+load_embedding_model()
 
 def generate_embedding(wav_path):
     if embedding_inference is None:

@@ -1,113 +1,171 @@
-
 # YouDub-webui: 优质视频中文化工具
+
+## 🚀 快速开始
+
+只需数步，即可开始使用 YouDub-webui：
+
+### 第一步：安装依赖
+
+```bash
+# Windows 用户直接双击运行
+setup_windows.bat
+```
+
+<br />
+
+### 第二步：启动程序
+
+```bash
+# Windows 用户直接双击运行
+run_windows.bat
+```
+
+完成！浏览器会自动打开 YouDub-webui 界面，粘贴视频链接即可开始使用。
+
+***
+
 ## 目录
+
 - [YouDub-webui: 优质视频中文化工具](#youdub-webui-优质视频中文化工具)
+  - [🚀 快速开始](#-快速开始)
   - [目录](#目录)
   - [简介](#简介)
   - [主要特点](#主要特点)
-  - [安装与使用指南](#安装与使用指南)
-    - [1. 克隆仓库](#1-克隆仓库)
-    - [2. 安装依赖](#2-安装依赖)
-      - [自动安装](#自动安装)
-      - [手动安装](#手动安装)
-    - [3. 环境设置](#3-环境设置)
-    - [4. 运行程序](#4-运行程序)
-      - [自动运行](#自动运行)
-      - [手动运行](#手动运行)
+  - [📦 安装指南](#-安装指南)
+    - [环境要求](#环境要求)
+    - [安装步骤](#安装步骤)
+  - [⚙️ 环境变量配置](#️-环境变量配置)
+    - [配置文件说明](#配置文件说明)
+    - [必填配置项](#必填配置项)
+    - [可选配置项](#可选配置项)
+  - [🚀 运行程序](#-运行程序)
   - [使用步骤](#使用步骤)
-    - [1. **全自动 (Do Everything)**](#1-全自动-do-everything)
-    - [2. **下载视频 (Download Video)**](#2-下载视频-download-video)
-    - [3. **人声分离 (Demucs Interface)**](#3-人声分离-demucs-interface)
-    - [4. **语音识别 (Whisper Inference)**](#4-语音识别-whisper-inference)
-    - [5. **字幕翻译 (Translation Interface)**](#5-字幕翻译-translation-interface)
-    - [6. **语音合成 (TTS Interface)**](#6-语音合成-tts-interface)
-    - [7. **视频合成 (Synthesize Video Interface)**](#7-视频合成-synthesize-video-interface)
+    - [1.](#1-全自动-do-everything) **[全自动 (Do Everything)](#1-全自动-do-everything)**
+    - [2.](#2-下载视频-download-video) **[下载视频 (Download Video)](#2-下载视频-download-video)**
+    - [3.](#3-人声分离-demucs-interface) **[人声分离 (Demucs Interface)](#3-人声分离-demucs-interface)**
+    - [4.](#4-语音识别-whisper-inference) **[语音识别 (Whisper Inference)](#4-语音识别-whisper-inference)**
+    - [5.](#5-字幕翻译-translation-interface) **[字幕翻译 (Translation Interface)](#5-字幕翻译-translation-interface)**
+    - [6.](#6-语音合成-tts-interface) **[语音合成 (TTS Interface)](#6-语音合成-tts-interface)**
+    - [7.](#7-视频合成-synthesize-video-interface) **[视频合成 (Synthesize Video Interface)](#7-视频合成-synthesize-video-interface)**
+  - [❓ 常见问题解答 (FAQ)](#-常见问题解答-faq)
+  - [🔧 故障排查指南](#-故障排查指南)
   - [技术细节](#技术细节)
     - [AI 语音识别](#ai-语音识别)
     - [大型语言模型翻译](#大型语言模型翻译)
-    - [AI 声音克隆](#ai-声音克隆)
     - [视频处理](#视频处理)
-  - [贡献指南](#贡献指南)
-  - [许可协议](#许可协议)
-  - [支持与联系方式](#支持与联系方式)
 
 ## 简介
-`YouDub-webui` 是 [`YouDub`](https://github.com/liuzhao1225/YouDub) 项目的网页交互版本，基于 `Gradio` 构建，为用户提供简易操作界面来访问和使用 [`YouDub`](https://github.com/liuzhao1225/YouDub) 的强大功能。[`YouDub`](https://github.com/liuzhao1225/YouDub) 是一个开创性的开源工具，旨在将 YouTube 和其他平台上的高质量视频翻译和配音成中文版本。该工具结合了最新的 AI 技术，包括语音识别、大型语言模型翻译，以及 AI 声音克隆技术，提供与原视频相似的中文配音，为中文用户提供卓越的观看体验。
+
+`YouDub-webui` 是 `YouDub`项目的网页交互版本，基于 `Gradio` 构建，为用户提供简易操作界面来访问和使用 `YouDub`的强大功能。`YouDub`是一个开创性的开源工具，旨在将 YouTube 和其他平台上的高质量视频翻译和配音成中文版本。该工具结合了最新的 AI 技术，包括语音识别、大型语言模型翻译，以及 AI 声音克隆技术，提供与原视频相似的中文配音，为中文用户提供卓越的观看体验。
 
 `YouDub-webui` 适用于多种场景，包括教育、娱乐和专业翻译，特别适合那些希望将国外优秀视频内容本地化的用户。此工具的简洁界面使得即使是非技术用户也能轻松上手，实现视频的快速中文化处理。
 
-了解更多关于 `YouDub-webui` 的信息和示例，请访问我们的 [bilibili 视频主页](https://space.bilibili.com/1263732318)。为了更好地服务社区，我们也设立了微信群组，欢迎通过扫描下方的[二维码](#支持与联系方式)加入我们，共同探讨和贡献于 `YouDub-webui` 的发展。
-
-
-当然，我将重新撰写 `YouDub-webui` 的主要特点部分。
-
----
+***
 
 ## 主要特点
+
 `YouDub-webui` 融合了多项先进技术，提供了一套完整的视频中文化工具包，其主要特点包括：
 
 - **视频下载**: 支持通过链接直接下载 YouTube 视频。无论是单个视频、播放列表还是频道内的多个视频，均能轻松下载。
 - **AI 语音识别**: 利用先进的 AI 技术，将视频中的语音高效转换为文字。不仅提供精确的语音到文本转换，还能自动对齐时间并识别不同说话者，极大地增强了信息的丰富性和准确性。
 - **大型语言模型翻译**: 结合大型语言模型如 GPT，实现快速且精准的中文翻译。无论是俚语还是专业术语，均能得到恰当的翻译，确保内容的准确性与地道性。
-- **AI 声音克隆**: 通过 AI 声音克隆技术，生成与原视频配音相似的中文语音。这不仅提升了视频的观看体验，也保留了原视频的情感和语调特色。
 - **视频处理**: 综合了音视频同步处理、字幕添加、视频播放速度调整和帧率设置等多项功能。用户可以根据需要生成高质量的最终视频，实现无缝的观看体验。
-- **自动上传**: 支持将最终视频自动上传到 Bilibili 平台。用户可以在不离开 `YouDub-webui` 的情况下，将视频上传到 Bilibili 平台，实现一键式的视频中文化处理。
 
 `YouDub-webui` 的这些特点使其成为一个强大且易于使用的视频中文化工具，无论是个人用户还是专业团队，都能从中受益。
 
+## 📦 安装指南
 
-## 安装与使用指南
+### 环境要求
 
-为了使用 `YouDub-webui`，请遵循以下步骤来安装和配置您的环境：
+| 项目        | 最低要求 | 推荐配置                      |
+| --------- | ---- | ------------------------- |
+| Python 版本 | 3.9  | 3.10+                     |
+| 内存        | 8GB  | 16GB 以上                   |
+| 显卡（可选）    | -    | NVIDIA GPU（支持 CUDA 11.8+） |
+| 硬盘空间      | 10GB | 20GB 以上                   |
 
-### 1. 克隆仓库
-首先，克隆 `YouDub-webui` 仓库到您的本地系统：
+### 安装步骤
+
+#### Windows 用户（推荐）
+
+**一键安装**
+
+双击运行 `setup_windows.bat`，脚本会自动完成：
+
+- 创建虚拟环境
+- 安装所有依赖
+- 配置 CUDA 支持（如有 NVIDIA 显卡）
+
+#### 手动安装（进阶用户）
+
+如果你需要自定义安装，可以按以下步骤操作：
+
 ```bash
-git clone https://github.com/liuzhao1225/YouDub-webui.git
+# 1. 创建虚拟环境
+python -m venv venv
+
+# 2. 激活虚拟环境
+venv\Scripts\activate
+
+# 3. 安装基础依赖
+pip install -r requirements.txt
+
+# 4. 安装 CUDA 版本的 PyTorch（可选，如有 NVIDIA 显卡，可大幅提升速度）
+pip3 install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
 ```
 
-### 2. 安装依赖
-您可以选择自动安装或手动安装依赖：
+## ⚙️ 环境变量配置
 
-#### 自动安装
-- 进入 `YouDub-webui` 目录，运行 `setup_windows` 脚本。
-- 脚本会在当前目录创建一个 `venv` 虚拟环境，并自动安装所需依赖，包括 CUDA 12.1 版本的 PyTorch。
+### 配置文件说明
 
-#### 手动安装
-- 进入 `YouDub-webui` 目录，使用以下命令安装依赖：
-  ```bash
-  cd YouDub-webui
-  pip install -r requirements.txt
-  ```
-- 由于 TTS 依赖的特殊性，所以将 TTS 移出了 `requirements.txt`，需要手动安装：
-  ```bash
-  pip install TTS
-  ```
-- 默认安装为 CPU 版本的 PyTorch 如果你需要手动安装特定 CUDA 版本的 PyTorch，可根据您的 CUDA 版本从 [PyTorch 官方网站](https://pytorch.org/) 获取安装命令。
+YouDub-webui 使用 `.env` 文件管理所有配置。首次使用前，请：
 
-### 3. 环境设置
-在运行前，请配置环境变量：
+1. 复制 `.env.example` 文件，重命名为 `.env`
+2. 根据你的需求填写配置项
+3. 保存文件后重启程序
 
-- **环境变量配置**：将 `.env.example` 改名为 `.env` 并填入以下环境变量：
-  - `OPENAI_API_KEY`: OpenAI API 密钥，格式通常为 `sk-xxx`。
-  - `MODEL_NAME`: 模型名称，如 'gpt-4' 或 'gpt-3.5-turbo'。
-  - `OPENAI_API_BASE`: OpenAI API 基础 URL，如果使用自己部署的模型，请填入。
-  - `HF_TOKEN`: Hugging Face token，用于 speaker diarization 功能。
-  - `HF_ENDPOINT`: 如果从 `huggingface` 下载模型时出错，可以添加此环境变量。
-  - `APPID` 和 `ACCESS_TOKEN`: 火山引擎 TTS 所需的凭据。
-  - `BILI_BASE64`: Bilibili API 所需的凭据。获取方法请参考 [bilibili-toolman 准备凭据](https://github.com/mos9527/bilibili-toolman?tab=readme-ov-file#%E5%87%86%E5%A4%87%E5%87%AD%E6%8D%AE)。
+### 必填配置项
 
-### 4. 运行程序
-选择以下任一方式运行程序：
+| 配置项              | 说明                   | 获取方式                                              |
+| ---------------- | -------------------- | ------------------------------------------------- |
+| `OPENAI_API_KEY` | OpenAI API 密钥，用于翻译功能 | [OpenAI 官网](https://platform.openai.com/api-keys) |
 
-#### 自动运行
-- 在 `YouDub-webui` 目录下运行 `run_windows.bat`。
+### 可选配置项
 
-#### 手动运行
-- 使用以下命令启动主程序：
-  ```bash
-  python app.py
-  ```
+| 配置项               | 说明                            | 默认值                                                    |
+| ----------------- | ----------------------------- | ------------------------------------------------------ |
+| `MODEL_NAME`      | 使用的 GPT 模型名称                  | `gpt-3.5-turbo`                                        |
+| `OPENAI_API_BASE` | 自定义 API 地址（用于第三方 API 或本地部署模型） | -                                                      |
+| `HF_TOKEN`        | Hugging Face Token，用于说话人识别    | [Hugging Face](https://huggingface.co/settings/tokens) |
+| `HF_ENDPOINT`     | Hugging Face 镜像地址（解决国内下载问题）   | `https://hf-mirror.com`                                |
+| `APPID`           | 火山引擎 APPID，用于高质量 TTS          | [火山引擎](https://console.volcengine.com/)                |
+| `ACCESS_TOKEN`    | 火山引擎 Access Token             | 同上                                                     |
+| `BILI_SESSDATA`   | Bilibili 登录凭证（用于上传）           | 浏览器 Cookie                                             |
+| `BILI_BILI_JCT`   | Bilibili CSRF Token（用于上传）     | 浏览器 Cookie                                             |
+
+> **提示**: 配置项说明不区分大小写，`BILI_BASE64` 为旧版配置，现已改用 `BILI_SESSDATA` 和 `BILI_BILI_JCT`。
+
+## 🚀 运行程序
+
+### Windows 用户（推荐）
+
+直接双击运行 `run_windows.bat`，程序会自动：
+
+- 激活虚拟环境
+- 启动 Web 服务
+- 打开浏览器界面
+
+### 手动运行
+
+```bash
+# 激活虚拟环境
+venv\Scripts\activate
+
+# 启动程序
+python app.py
+```
+
+启动成功后，在浏览器中访问 `http://localhost:7860` 即可使用。
 
 ## 使用步骤
 
@@ -189,30 +247,181 @@ git clone https://github.com/liuzhao1225/YouDub-webui.git
 - **FPS**: 设置视频的帧率。
 - **Resolution**: 选择视频的分辨率。
 
+## ❓ 常见问题解答 (FAQ)
+
+### Q1: 支持哪些 Python 版本？
+
+**A**: 推荐使用 Python 3.10及以上版本。
+
+### Q2: 必须使用虚拟环境吗？
+
+**A**: 强烈建议使用虚拟环境！虚拟环境可以避免依赖冲突，保持系统环境干净。我们提供的 `setup_windows.bat` 会自动创建虚拟环境。
+
+### Q3: 依赖安装失败怎么办？
+
+**A**:
+
+1. 检查 Python 版本是否为 3.9+
+2. 尝试升级 pip：`python -m pip install --upgrade pip`
+3. 使用国内镜像源：`pip install -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple`
+4. 如果是 TTS 安装失败，可以先跳过，使用火山引擎 TTS 替代
+
+### Q4: 如何启用 CUDA 加速？
+
+**A**:
+
+1. 确保安装了 NVIDIA 显卡驱动
+2. 安装 CUDA Toolkit 11.8 或 12.x
+3. 运行：`pip3 install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121`
+4. 验证：在 Python 中执行 `import torch; print(torch.cuda.is_available())` 应返回 `True`
+
+### Q5: OPENAI\_API\_KEY 如何获取？
+
+**A**:以OpenAI官方为例：
+
+1. 访问 [OpenAI Platform](https://platform.openai.com/) 注册账号
+2. 进入 [API Keys](https://platform.openai.com/api-keys) 页面
+3. 点击 "Create new secret key" 生成密钥
+4. 注意保存好密钥，只显示一次！
+
+### Q6: Hugging Face 模型下载很慢怎么办？
+
+**A**: 设置中添加国内镜像地址，加速模型下载。
+
+### Q7: 翻译效果不好怎么办？
+
+**A**:
+
+1. 尝试更换模型：修改 `MODEL_NAME` 
+2. 检查原视频语音识别是否准确，口音重可能影响识别
+3. 可以手动编辑 `translation.json` 文件修正翻译
+
+### Q8: 语音合成没有声音怎么办？
+
+**A**:
+
+1. 检查是否配置了火山引擎 `APPID` 和 `ACCESS_TOKEN`
+2. 确保网络连接正常，火山引擎 TTS 需要联网
+3. 尝试勾选 "Force Bytedance" 强制使用火山引擎
+4. 如果使用 F5-TTS，首次运行会下载模型，请耐心等待
+
+### Q9: 处理视频时内存不足怎么办？
+
+**A**:
+
+1. 降低 Whisper 模型大小（使用 `base` 或 `small` 而非 `large`）
+2. 减小 Batch Size
+3. 关闭其他占用内存的程序
+4. 增加虚拟内存（页面文件）大小
+
+### Q10: 可以处理本地视频文件吗？
+
+**A**: 可以！将视频文件放入工作目录，然后跳过"下载视频"步骤，直接从"人声分离"开始处理即可。
+
+***
+
+## 🔧 故障排查指南
+
+### 第一步：环境检查
+
+#### 检查 Python 版本
+
+```bash
+python --version
+```
+
+✅ 正常：显示 `Python 3.10.x` 或 `3.11.x`
+❌ 异常：版本过高或过低 → 安装正确的 Python 版本
+
+#### 检查虚拟环境
+
+运行 `setup_windows.bat` 后，检查是否存在 `venv` 文件夹
+✅ 正常：`venv` 文件夹存在且内含多个子文件夹
+❌ 异常：文件夹不存在 → 重新运行安装脚本
+
+#### 检查依赖安装
+
+```bash
+venv\Scripts\activate
+pip list
+```
+
+✅ 正常：能看到 `torch`, `gradio`, `openai` 等包
+❌ 异常：缺少关键包 → 重新运行 `pip install -r requirements.txt`
+
+### 第二步：网络问题排查
+
+#### 检查网络连接
+
+```bash
+ping api.openai.com
+```
+
+✅ 正常：能收到响应
+❌ 异常：请求超时 → 检查网络设置或代理配置
+
+#### 测试 OpenAI API
+
+在 `.env` 配置好 API Key 后，运行以下测试：
+
+```python
+import os
+from openai import OpenAI
+client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+response = client.chat.completions.create(
+    model="gpt-3.5-turbo",
+    messages=[{"role": "user", "content": "Hello"}]
+)
+print(response.choices[0].message.content)
+```
+
+✅ 正常：输出 "Hello!" 或类似回复
+❌ 异常：报错 → 检查 API Key 是否正确，账户是否有余额
+
+#### 检查 Hugging Face 连接
+
+如果模型下载失败：
+
+1. 验证 `HF_TOKEN` 是否正确配置
+2. 尝试设置 `HF_ENDPOINT=https://hf-mirror.com`
+3. 检查防火墙是否阻止下载
+
+### 第三步：CUDA 问题排查
+
+#### 验证 CUDA 是否可用
+
+```python
+import torch
+print("CUDA available:", torch.cuda.is_available())
+print("CUDA version:", torch.version.cuda)
+print("GPU count:", torch.cuda.device_count())
+```
+
+✅ 正常：`CUDA available: True`，显示正确的版本号
+❌ 异常：返回 False → 重新安装 CUDA 版本的 PyTorch
+
+#### 常见 CUDA 错误解决方案
+
+1. **"CUDA out of memory"**：减小模型大小或 batch size
+2. **"CUDA kernel errors"**：升级显卡驱动到最新版本
+3. **"No CUDA GPUs are available"**：确认显卡支持 CUDA 且驱动正常
+
+### 第四步：常见错误信息及解决方案
+
+| 错误信息                                         | 可能原因          | 解决方案                          |
+| -------------------------------------------- | ------------- | ----------------------------- |
+| `ModuleNotFoundError: No module named 'xxx'` | 缺少依赖包         | 运行 `pip install xxx`          |
+| `AuthenticationError`                        | API Key 错误或过期 | 检查 `.env` 中的 `OPENAI_API_KEY` |
+| `RateLimitError`                             | API 调用频率超限    | 稍后重试                          |
+| `ConnectionError`                            | 网络连接问题        | 检查网络、代理、防火墙设置                 |
+| `RuntimeError: CUDA error`                   | GPU 内存不足或驱动问题 | 减小模型大小、升级驱动                   |
+
 ## 技术细节
 
 ### AI 语音识别
+
 我们的 AI 语音识别功能现在基于 [WhisperX](https://github.com/m-bain/whisperX) 实现。WhisperX 是一个高效的语音识别系统，建立在 OpenAI 开发的 Whisper 系统之上。它不仅能够精确地将语音转换为文本，还能自动对齐时间，并识别每句话的说话人物。这种先进的处理方式不仅提高了处理速度和准确度，还为用户提供了更丰富的信息，例如说话者的识别。
 
 ### 大型语言模型翻译
-我们的翻译功能继续使用 OpenAI API 提供的各种模型，包括官方的 GPT 模型。同时，我们也在利用诸如 [api-for-open-llm](https://github.com/xusenlinzy/api-for-open-llm) 这样的项目，这使我们能够更灵活地整合和利用不同的大型语言模型进行翻译工作，确保翻译质量和效率。
 
-### AI 声音克隆
-在声音克隆方面，我们已经转向使用 [Coqui AI TTS](https://github.com/coqui-ai/TTS)。同时，对于单一说话人的情况，我们采用了火山引擎进行 TTS，以获得更优质的音质。火山引擎的高级技术能够生成极其自然且流畅的语音，适用于各种应用场景，提升了最终产品的整体质量。
-
-### 视频处理
-在视频处理方面，我们依然强调音视频的同步处理。我们的目标是确保音频与视频画面的完美对齐，并生成准确的字幕，从而为用户提供一个无缝且沉浸式的观看体验。我们的处理流程和技术确保了视频内容的高质量和观看的连贯性。
-
-
-## 贡献指南
-欢迎对 `YouDub-webui` 进行贡献。您可以通过 [GitHub Issues](https://github.com/liuzhao1225/YouDub-webui/issues) 或 [Pull Request](https://github.com/liuzhao1225/YouDub-webui/pulls) 提交改进建议或报告问题。
-
-## 许可协议
-`YouDub-webui` 遵循 Apache License 2.0。使用本工具时，请确保遵守相关的法律和规定，包括版权法、数据保护法和隐私法。未经原始内容创作者和/或版权所有者许可，请勿使用此工具。
-
-## 支持与联系方式
-如需帮助或有任何疑问，请通过 [GitHub Issues](https://github.com/liuzhao1225/YouDub-webui/issues) 联系我们。
-加入我们的Discord服务器进行讨论和获取支持：[Discord服务器](https://discord.gg/vbkYnN2Rrm)
-你也可以加入我们的微信群，扫描下方的二维码即可：
-
-![WeChat Group](17ab2707ec88ddd8ad3fbd5c705d076b.png)
+我们的翻译功能继续使用 OpenAI API 提供的各种模型，包括官方的 GPT 模型。

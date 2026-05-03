@@ -315,6 +315,42 @@ def download_all_videos_under_folder(root_folder, url=None, video_path=None, res
     return f'Downloaded all videos under {root_folder}'
 
 
+def download_videos_in_folders(folder_list, resolution="1080p"):
+    """处理指定目录列表中的视频下载
+
+    Args:
+        folder_list: 需要处理的目录路径列表
+        resolution: 视频分辨率
+    """
+    if isinstance(folder_list, str):
+        folder_list = [folder_list]
+    success_list = []
+    fail_list = []
+    for folder in folder_list:
+        folder = os.path.abspath(folder)
+        info_path = os.path.join(folder, 'download.info.json')
+        if not os.path.exists(info_path):
+            fail_list.append(f"{folder}: 缺少 download.info.json")
+            continue
+        if os.path.exists(os.path.join(folder, 'download.mp4')):
+            logger.info(f'Video already downloaded in {folder}')
+            success_list.append(folder)
+            continue
+        try:
+            with open(info_path, 'r', encoding='utf-8') as f:
+                info = json.load(f)
+            result = download_single_video(info, os.path.dirname(folder), resolution)
+            if result:
+                success_list.append(folder)
+            else:
+                fail_list.append(f"{folder}: 下载失败")
+        except Exception as e:
+            logger.error(f'Error downloading video in {folder}: {e}')
+            fail_list.append(f"{folder}: {e}")
+    logger.info(f'Downloaded {len(success_list)}/{len(folder_list)} videos; {len(fail_list)} failed')
+    return f'成功: {len(success_list)}\n失败: {len(fail_list)}'
+
+
 if __name__ == '__main__':
     # Example usage
     url = 'https://www.youtube.com/watch?v=3LPJfIKxwWc'

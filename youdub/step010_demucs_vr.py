@@ -50,7 +50,7 @@ def separate_audio(folder: str, model_name: str = "htdemucs_ft", device: str = '
         return
     
     logger.info(f'Separating audio from {folder}')
-    logger.info(f'注意: {model_name} 模型将分离 4 个音轨 (drums, bass, other, vocals)，每个音轨都会显示独立的进度条')
+    logger.info(f'注意: {model_name} 模型将分离 4 个音轨 (drums, bass, other, vocals) {shifts} 遍，每个音轨都会显示独立的进度条')
     load_model(model_name, device, progress, shifts)
     t_start = time.time()
     try:
@@ -187,6 +187,48 @@ def separate_all_audio_under_folder(root_folder: str, model_name: str = "htdemuc
         return f'All audio separated under {root_folder}'
     finally:
         cleanup_demucs()
+
+
+def separate_audio_in_folders(folder_list, model_name="htdemucs_ft", device='auto', progress=True, shifts=5):
+    """处理指定目录列表中的音频分离
+
+    Args:
+        folder_list: 需要处理的目录路径列表
+        model_name: Demucs 模型名称
+        device: 计算设备
+        progress: 是否显示进度条
+        shifts: 移位数
+    """
+    if isinstance(folder_list, str):
+        folder_list = [folder_list]
+    global separator
+    success_list = []
+    fail_list = []
+    for subdir in folder_list:
+        subdir = os.path.abspath(subdir)
+        video_path = os.path.join(subdir, 'download.mp4')
+        if not os.path.exists(video_path):
+            fail_list.append(f"{subdir}: 缺少 download.mp4")
+            continue
+        try:
+            audio_path = os.path.join(subdir, 'audio.wav')
+            if not os.path.exists(audio_path):
+                logger.info(f'提取音频: {subdir}')
+                extract_audio_from_video(subdir)
+            vocal_output_path = os.path.join(subdir, 'audio_vocals.wav')
+            instruments_output_path = os.path.join(subdir, 'audio_instruments.wav')
+            if os.path.exists(vocal_output_path) and os.path.exists(instruments_output_path):
+                logger.info(f'音频已分离，跳过: {subdir}')
+                success_list.append(subdir)
+                continue
+            separate_audio(subdir, model_name, device, progress, shifts)
+            success_list.append(subdir)
+        except Exception as e:
+            logger.error(f'Error separating audio in {subdir}: {e}')
+            fail_list.append(f"{subdir}: {e}")
+    cleanup_demucs()
+    logger.info(f'音频分离完成: 成功 {len(success_list)}/{len(folder_list)}, 失败 {len(fail_list)}')
+    return f'成功: {len(success_list)}\n失败: {len(fail_list)}'
     
 if __name__ == '__main__':
     folder = r"videos"

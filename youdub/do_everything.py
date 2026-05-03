@@ -56,6 +56,19 @@ def process_video_with_modules(info, root_folder, params, selected_modules=None,
             logger.warning(f"Failed to download video {info['title']}")
             return True
     
+    return process_folder_with_modules(folder, params, selected_modules, skip_completed, selected_files)
+
+
+def process_folder_with_modules(folder, params, selected_modules=None, skip_completed=True, selected_files=None):
+    """使用选择性模块处理指定目录
+
+    Args:
+        folder: 要处理的目录路径
+        params: 参数字典
+        selected_modules: 选择的模块ID列表，None表示执行所有模块
+        skip_completed: 是否跳过已完成的步骤
+        selected_files: 用户手动选择的输入文件字典
+    """
     # 复制用户选择的输入文件到处理文件夹
     copy_user_selected_files(folder, selected_files)
     
@@ -90,7 +103,7 @@ def process_video_with_modules(info, root_folder, params, selected_modules=None,
     return True
 
 
-def process_video(info, root_folder, resolution, demucs_model, device, shifts, whisper_model, whisper_download_root, whisper_batch_size, whisper_diarization, whisper_min_speakers, whisper_max_speakers, translation_target_language, force_bytedance, subtitles, speed_up, fps, target_resolution, max_retries, auto_upload_video):
+def process_video(info, root_folder, resolution, demucs_model, device, shifts, whisper_model, whisper_download_root, whisper_batch_size, whisper_diarization, whisper_min_speakers, whisper_max_speakers, translation_target_language, force_bytedance, subtitles, use_original_audio, speed_up, fps, target_resolution, max_retries, auto_upload_video):
     """原有全流程处理函数（保持向后兼容）"""
     local_time = time.localtime()
     
@@ -142,7 +155,7 @@ def process_video(info, root_folder, resolution, demucs_model, device, shifts, w
                 folder, target_language=translation_target_language
             )
             generate_all_wavs_under_folder(folder, force_bytedance=force_bytedance)
-            synthesize_all_video_under_folder(folder, subtitles=subtitles, speed_up=speed_up, fps=fps, resolution=target_resolution)
+            synthesize_all_video_under_folder(folder, subtitles=subtitles, use_original_audio=use_original_audio, speed_up=speed_up, fps=fps, resolution=target_resolution)
             generate_all_info_under_folder(folder)
             if auto_upload_video:
                 time.sleep(1)
@@ -159,7 +172,7 @@ def process_video(info, root_folder, resolution, demucs_model, device, shifts, w
     return False
 
 
-def do_everything(root_folder, url=None, local_video_paths=None, num_videos=5, resolution="1080p", demucs_model="htdemucs_ft", device="auto", shifts=5, whisper_model="large", whisper_download_root="models/ASR/whisper", whisper_batch_size=32, whisper_diarization=True, whisper_min_speakers=None, whisper_max_speakers=None, translation_target_language="简体中文", force_bytedance=True, subtitles=True, speed_up=1.05, fps=30, target_resolution="1080p", max_workers=1, max_retries=3, auto_upload_video=False, selected_modules=None, skip_completed=True, selected_files=None):
+def do_everything(root_folder, url=None, local_video_paths=None, num_videos=5, resolution="1080p", demucs_model="htdemucs_ft", device="auto", shifts=5, whisper_model="large", whisper_download_root="models/ASR/whisper", whisper_batch_size=32, whisper_diarization=True, whisper_min_speakers=None, whisper_max_speakers=None, translation_target_language="简体中文", force_bytedance=True, subtitles=True, use_original_audio=False, speed_up=1.05, fps=30, target_resolution="1080p", max_workers=1, max_retries=3, auto_upload_video=False, selected_modules=None, skip_completed=True, selected_files=None, selected_folders=None):
     """
     全自动处理视频
     
@@ -167,20 +180,12 @@ def do_everything(root_folder, url=None, local_video_paths=None, num_videos=5, r
         selected_modules: 选择的模块ID列表，None表示执行所有模块
         skip_completed: 是否跳过已完成的步骤
         selected_files: 用户手动选择的输入文件字典，格式为 {filename: filepath}
+        selected_folders: 用户选择的目录路径列表，若提供则直接处理这些目录
     """
     success_list = []
     fail_list = []
+    failed_folders = []
 
-    video_info_iterator = None
-    if local_video_paths is not None and len(local_video_paths) > 0:
-        video_info_iterator = get_info_list_from_local(local_video_paths, root_folder)
-    elif url is not None and url.strip():
-        url = url.replace(" ", "").replace("，", "\n").replace(",", "\n")
-        urls = [_ for _ in url.split("\n") if _]
-        video_info_iterator = get_info_list_from_url(urls, num_videos)
-    else:
-        return "Error: Please provide either video URL(s) or local video file(s)"
-    
     params = {
         "resolution": resolution,
         "demucs_model": demucs_model,
@@ -195,19 +200,58 @@ def do_everything(root_folder, url=None, local_video_paths=None, num_videos=5, r
         "translation_target_language": translation_target_language,
         "force_bytedance": force_bytedance,
         "subtitles": subtitles,
+        "use_original_audio": use_original_audio,
         "speed_up": speed_up,
         "fps": fps,
         "target_resolution": target_resolution,
         "max_retries": max_retries,
         "auto_upload_video": auto_upload_video,
     }
+
+    # 如果提供了 selected_folders，直接处理这些目录
+    if selected_folders:
+        if isinstance(selected_folders, str):
+            selected_folders = [sf.strip() for sf in selected_folders.split('\n') if sf.strip()]
+        logger.info(f"Processing {len(selected_folders)} selected folders")
+        for folder in selected_folders:
+            folder = os.path.abspath(folder)
+            if not os.path.exists(folder):
+                failed_folders.append(folder)
+                logger.warning(f"Folder does not exist: {folder}")
+                continue
+            try:
+                copy_user_selected_files(folder, selected_files)
+                success = process_folder_with_modules(folder, params, selected_modules, skip_completed, selected_files)
+                if success:
+                    success_list.append({"title": os.path.basename(folder), "folder": folder})
+                else:
+                    failed_folders.append(folder)
+            except Exception as e:
+                logger.error(f"Error processing folder {folder}: {e}")
+                failed_folders.append(folder)
+        result_parts = [f"✅ 成功: {len(success_list)} 个目录"]
+        if failed_folders:
+            result_parts.append(f"❌ 失败: {len(failed_folders)} 个目录")
+            for f in failed_folders[:5]:
+                result_parts.append(f"  - {os.path.basename(f)}")
+        return "\n".join(result_parts)
+
+    video_info_iterator = None
+    if local_video_paths is not None and len(local_video_paths) > 0:
+        video_info_iterator = get_info_list_from_local(local_video_paths, root_folder)
+    elif url is not None and url.strip():
+        url = url.replace(" ", "").replace("，", "\n").replace(",", "\n")
+        urls = [_ for _ in url.split("\n") if _]
+        video_info_iterator = get_info_list_from_url(urls, num_videos)
+    else:
+        return "Error: Please provide either video URL(s), local video file(s), or selected folders"
     
     for info in video_info_iterator:
         try:
             if selected_modules is not None:
                 success = process_video_with_modules(info, root_folder, params, selected_modules, skip_completed, selected_files)
             else:
-                success = process_video(info, root_folder, resolution, demucs_model, device, shifts, whisper_model, whisper_download_root, whisper_batch_size, whisper_diarization, whisper_min_speakers, whisper_max_speakers, translation_target_language, force_bytedance, subtitles, speed_up, fps, target_resolution, max_retries, auto_upload_video)
+                success = process_video(info, root_folder, resolution, demucs_model, device, shifts, whisper_model, whisper_download_root, whisper_batch_size, whisper_diarization, whisper_min_speakers, whisper_max_speakers, translation_target_language, force_bytedance, subtitles, use_original_audio, speed_up, fps, target_resolution, max_retries, auto_upload_video)
             
             if success:
                 success_list.append(info)

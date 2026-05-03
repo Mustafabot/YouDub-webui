@@ -72,5 +72,35 @@ def generate_all_info_under_folder(root_folder):
     if not found_video_dir:
         raise FileNotFoundError(f'在 {root_folder} 下未找到任何视频处理目录')
     return f'Generated all info under {root_folder}'
+def generate_info_in_folders(folder_list):
+    """处理指定目录列表中的信息生成
+
+    Args:
+        folder_list: 需要处理的目录路径列表
+    """
+    if isinstance(folder_list, str):
+        folder_list = [folder_list]
+    success_list = []
+    fail_list = []
+    for subdir in folder_list:
+        subdir = os.path.abspath(subdir)
+        files = os.listdir(subdir) if os.path.exists(subdir) else []
+        if 'download.info.json' not in files:
+            fail_list.append(f"{subdir}: 缺少 download.info.json")
+            continue
+        if 'video.txt' in files and 'video.png' in files:
+            logger.info(f'信息已生成，跳过: {subdir}')
+            success_list.append(subdir)
+            continue
+        try:
+            generate_info(subdir)
+            success_list.append(subdir)
+        except Exception as e:
+            logger.error(f'Error generating info in {subdir}: {e}')
+            fail_list.append(f"{subdir}: {e}")
+    logger.info(f'信息生成完成: 成功 {len(success_list)}/{len(folder_list)}, 失败 {len(fail_list)}')
+    return f'成功: {len(success_list)}\n失败: {len(fail_list)}'
+
+
 if __name__ == '__main__':
     generate_all_info_under_folder('videos')

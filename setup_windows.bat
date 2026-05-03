@@ -26,7 +26,7 @@ for %%m in (
                 set PIP_MIRROR=%%a
                 set PIP_MIRROR_HOST=%%b
                 echo         Found mirror: %%b
-                echo [%%date%% %%time%%] Using mirror: %%b >> %LOGFILE%
+                echo [%date% %time%] Using mirror: %%b >> %LOGFILE%
             )
         )
     )
@@ -41,18 +41,34 @@ if "!PIP_MIRROR!"=="" (
 
 :: Check for Python 3.8+
 echo [1/7] Checking Python version...
-py -c "import sys; ver=tuple(map(int,sys.version.split()[0].split('.'))); sys.exit(0 if ver>=(3,8) else 1)" >nul 2>&1
-IF %ERRORLEVEL% NEQ 0 (
-    echo [ERROR] Python 3.8+ is required but not found.
-    echo Please download and install Python from https://www.python.org/downloads/
-    echo Make sure to check "Add Python to PATH" during installation.
-    echo [%date% %time%] ERROR: Python 3.8+ not found >> %LOGFILE%
-    pause
-    EXIT /B 1
+for /f "tokens=*" %%i in ('py -c "import sys; ver=sys.version.split()[0].split('.'); print(int(ver[0])); print(int(ver[1]))"') do (
+  if not defined PYMAJOR (
+    set PYMAJOR=%%i
+  ) else (
+    set PYMINOR=%%i
+  )
 )
-for /f "tokens=*" %%i in ('py -c "import sys; print(sys.version.split()[0])"') do set PYVER=%%i
-echo         Found Python %PYVER%
-echo [%date% %time%] Python %PYVER% found >> %LOGFILE%
+:: Check via batch comparison (avoids cmd.exe > parsing issue)
+set PYVER_OK=0
+if !PYMAJOR! GEQ 4 set PYVER_OK=1
+if !PYMAJOR! EQU 3 if !PYMINOR! GEQ 8 set PYVER_OK=1
+if not !PYVER_OK! EQU 0 goto PYVER_PASS
+echo.
+echo [错误] 未找到 Python 3.8 或更高版本。
+echo.
+echo ============================================
+echo   解决方案：
+echo   1. 从 https://www.python.org/downloads/ 下载安装 Python
+echo   2. 安装时勾选 "Add Python to PATH"
+echo   3. 安装完成后重新运行此脚本
+echo ============================================
+echo.
+echo [%date% %time%] ERROR: Python 3.8+ not found >> %LOGFILE%
+pause
+EXIT /B 1
+:PYVER_PASS
+echo         Found Python %PYMAJOR%.%PYMINOR%.x
+echo [%date% %time%] Python %PYMAJOR%.%PYMINOR% found >> %LOGFILE%
 
 :: Create a virtual environment if it doesn't exist
 echo.
@@ -61,7 +77,17 @@ IF NOT EXIST "venv" (
     echo         Creating virtual environment...
     py -m venv venv
     IF %ERRORLEVEL% NEQ 0 (
-        echo [ERROR] Failed to create virtual environment.
+        echo.
+        echo [错误] 创建虚拟环境失败。
+        echo.
+        echo ============================================
+        echo   解决方案
+        echo   1. 以管理员权限运行此脚本
+        echo   2. 检查磁盘空间是否充足
+        echo   3. 检查是否有权限创建 venv 目录
+        echo   4. 暂时关闭杀毒软件后重试
+        echo ============================================
+        echo.
         echo [%date% %time%] ERROR: venv creation failed >> %LOGFILE%
         pause
         EXIT /B 1
@@ -75,7 +101,16 @@ IF NOT EXIST "venv" (
 :: Activate the virtual environment
 CALL venv\Scripts\activate
 IF %ERRORLEVEL% NEQ 0 (
-    echo [ERROR] Failed to activate virtual environment.
+    echo.
+    echo [错误] 激活虚拟环境失败。
+    echo.
+    echo ============================================
+    echo   解决方案
+    echo   1. 删除 venv 文件夹，重新运行此脚本
+    echo   2. 以管理员权限运行此脚本
+    echo   3. 检查 Python 安装是否完整
+    echo ============================================
+    echo.
     echo [%date% %time%] ERROR: venv activation failed >> %LOGFILE%
     pause
     EXIT /B 1
@@ -86,7 +121,7 @@ echo.
 echo [3/7] Upgrading pip...
 python -m pip install --upgrade pip !PIP_MIRROR_OPTS! >> %LOGFILE% 2>&1
 IF %ERRORLEVEL% NEQ 0 (
-    echo [WARNING] pip upgrade failed, continuing with current version...
+    echo [错误] pip 升级失败，将使用当前版本...
     echo [%date% %time%] WARNING: pip upgrade failed >> %LOGFILE%
 ) else (
     echo         pip upgraded successfully.
@@ -98,7 +133,17 @@ echo.
 echo [4/7] Installing requirements from requirements.txt...
 pip install -r requirements.txt !PIP_MIRROR_OPTS! >> %LOGFILE% 2>&1
 IF %ERRORLEVEL% NEQ 0 (
-    echo [ERROR] Failed to install requirements. Check install.log for details.
+    echo.
+    echo [错误] 安装依赖项失败。
+    echo.
+    echo ============================================
+    echo   解决方案
+    echo   1. 查看 install.log 了解详细错误
+    echo   2. 检查网络连接是否稳定
+    echo   3. 或手动执行: pip install -r requirements.txt
+    echo   4. 若使用代理，请检查系统 pip 配置
+    echo ============================================
+    echo.
     echo [%date% %time%] ERROR: requirements install failed >> %LOGFILE%
     pause
     EXIT /B 1
@@ -111,7 +156,7 @@ echo.
 echo [5/7] Installing TTS (optional)...
 pip install TTS !PIP_MIRROR_OPTS! >> %LOGFILE% 2>&1
 IF %ERRORLEVEL% NEQ 0 (
-    echo [WARNING] TTS installation failed. You can install it manually later with: pip install TTS
+    echo [错误] TTS 安装失败。暂不使用 TTS 功能，可稍后手动执行: pip install TTS
     echo [%date% %time%] WARNING: TTS install failed >> %LOGFILE%
 ) else (
     echo         TTS installed successfully.
@@ -159,12 +204,12 @@ IF %ERRORLEVEL% EQU 0 (
             set TORCH_INDEX=https://download.pytorch.org/whl/cu118
             set TORCH_LABEL=CUDA 11.x (cu118)
         ) else (
-            echo [WARNING] Unsupported CUDA version !CUDA_VER!, falling back to CPU.
+            echo [错误] 不支持的 CUDA 版本 !CUDA_VER!，将使用 CPU 版本。
             echo [%date% %time%] WARNING: Unsupported CUDA !CUDA_VER!, using CPU >> %LOGFILE%
             set TORCH_LABEL=CPU
         )
     ) else (
-        echo [WARNING] Could not detect CUDA version, falling back to CPU.
+        echo [错误] 无法检测 CUDA 版本，将使用 CPU 版本。
         echo [%date% %time%] WARNING: CUDA version undetected, using CPU >> %LOGFILE%
         set TORCH_LABEL=CPU
     )
@@ -181,7 +226,17 @@ if defined TORCH_INDEX (
     pip install torch torchvision torchaudio !PIP_MIRROR_OPTS! >> %LOGFILE% 2>&1
 )
 IF %ERRORLEVEL% NEQ 0 (
-    echo [ERROR] Failed to install PyTorch. Check install.log for details.
+    echo.
+    echo [错误] 安装 PyTorch 失败。
+    echo.
+    echo ============================================
+    echo   解决方案
+    echo   1. 查看 install.log 了解详细错误
+    echo   2. 检查网络连接是否稳定
+    echo   3. 若使用 CUDA 版本，请确认驱动已正确
+    echo   4. 可尝试手动安装: pip install torch torchvision torchaudio
+    echo ============================================
+    echo.
     echo [%date% %time%] ERROR: PyTorch install failed >> %LOGFILE%
     pause
     EXIT /B 1
@@ -197,14 +252,14 @@ IF %ERRORLEVEL% EQU 0 (
     echo         numba/numpy compatibility verified.
     echo [%date% %time%] Dependency check passed >> %LOGFILE%
 ) else (
-    echo [WARNING] Dependency check failed. Attempting to fix by reinstalling...
+    echo [错误] 依赖检查失败。正在尝试重新安装修复...
     echo [%date% %time%] WARNING: Dependency check failed >> %LOGFILE%
     python -m pip install "numpy<2.4" "numba>=0.63" !PIP_MIRROR_OPTS! >> %LOGFILE% 2>&1
     IF %ERRORLEVEL% EQU 0 (
         echo         Fixed dependencies automatically.
         echo [%date% %time%] Dependencies fixed >> %LOGFILE%
     ) else (
-        echo [WARNING] Could not auto-fix dependencies. Check install.log for details.
+        echo [错误] 无法自动修复依赖问题。请查看 install.log 了解详情。
         echo [%date% %time%] WARNING: Auto-fix failed >> %LOGFILE%
     )
 )
@@ -216,14 +271,14 @@ IF NOT EXIST ".env" (
     IF EXIST ".env.example" (
         copy .env.example .env >nul 2>&1
         IF %ERRORLEVEL% NEQ 0 (
-            echo [WARNING] Failed to create .env from .env.example.
+            echo [错误] 无法从 .env.example 创建 .env 文件。
             echo [%date% %time%] WARNING: .env creation failed >> %LOGFILE%
         ) else (
             echo         Created .env from .env.example. Please review and edit it.
             echo [%date% %time%] .env created from .env.example >> %LOGFILE%
         )
     ) else (
-        echo [WARNING] .env.example not found. Please create .env manually.
+        echo [错误] 未找到 .env.example 文件，请手动创建 .env 文件。
         echo [%date% %time%] WARNING: .env.example not found >> %LOGFILE%
     )
 ) else (

@@ -23,7 +23,9 @@ def preprocess_text(text):
     return text
     
     
-def adjust_audio_length(wav_path, desired_length, sample_rate = 24000, min_speed_factor = 0.6, max_speed_factor = 1.1):
+def adjust_audio_length(wav_path, desired_length, sample_rate=24000):
+    min_speed_factor = float(get_config('TTS_STRETCH_MIN_SPEED', 0.6))
+    max_speed_factor = float(get_config('TTS_STRETCH_MAX_SPEED', 1.3))
     wav, sample_rate = librosa.load(wav_path, sr=sample_rate)
     current_length = len(wav)/sample_rate
     speed_factor = max(
@@ -33,6 +35,49 @@ def adjust_audio_length(wav_path, desired_length, sample_rate = 24000, min_speed
     stretch_audio(wav_path, target_path, ratio=speed_factor, sample_rate=sample_rate)
     wav, sample_rate = librosa.load(target_path, sr=sample_rate)
     return wav[:int(desired_length*sample_rate)], desired_length
+
+
+def distribute_extra_silence(wav, sample_rate, desired_length,
+                             silence_threshold=0.02,
+                             min_silence_ms=50):
+    current_len = len(wav) / sample_rate
+    if current_len >= desired_length:
+        return wav
+    extra_samples = int((desired_length - current_len) * sample_rate)
+    abs_wav = np.abs(wav)
+    threshold = silence_threshold * np.max(abs_wav)
+    is_silent = abs_wav < threshold
+    silence_runs = []
+    in_silence = False
+    run_start = 0
+    min_silence_samples = int(min_silence_ms / 1000 * sample_rate)
+    for i in range(len(is_silent)):
+        if is_silent[i] and not in_silence:
+            in_silence = True
+            run_start = i
+        elif not is_silent[i] and in_silence:
+            in_silence = False
+            if i - run_start >= min_silence_samples:
+                silence_runs.append([run_start, i])
+    if in_silence and len(is_silent) - run_start >= min_silence_samples:
+        silence_runs.append([run_start, len(is_silent)])
+    if not silence_runs:
+        return np.concatenate((wav, np.zeros(extra_samples)))
+    total_silence = float(sum(end - start for start, end in silence_runs))
+    result_parts = []
+    last_end = 0
+    for start, end in silence_runs:
+        result_parts.append(wav[last_end:start])
+        result_parts.append(wav[start:end])
+        proportion = (end - start) / total_silence
+        extra_len = int(extra_samples * proportion)
+        if extra_len > 0:
+            result_parts.append(np.zeros(extra_len))
+        last_end = end
+    result_parts.append(wav[last_end:])
+    result = np.concatenate(result_parts)
+    return result[:int(desired_length * sample_rate)]
+
 
 def generate_wavs(folder, force_bytedance=False):
     transcript_path = os.path.join(folder, 'translation.json')
@@ -142,6 +187,8 @@ def generate_wavs(folder, force_bytedance=False):
             next_end = next_line['end']
             end = min(start + length, next_end)
         wav, length = adjust_audio_length(output_path, end-start)
+        wav = distribute_extra_silence(wav, 24000, end - start)
+        length = len(wav) / 24000
 
         full_wav = np.concatenate((full_wav, wav))
         line['end'] = start + length
@@ -193,6 +240,37 @@ def generate_all_wavs_under_folder(root_folder, force_bytedance=False):
         raise FileNotFoundError(f'在 {root_folder} 下未找到任何视频处理目录')
     logger.info(f'语音合成完成: {root_folder}')
     return f'Generated all wavs under {root_folder}'
+
+def generate_wavs_in_folders(folder_list, force_bytedance=False):
+    """处理指定目录列表中的语音合成
+
+    Args:
+        folder_list: 需要处理的目录路径列表
+        force_bytedance: 是否强制使用火山引擎 TTS
+    """
+    if isinstance(folder_list, str):
+        folder_list = [folder_list]
+    success_list = []
+    fail_list = []
+    for subdir in folder_list:
+        subdir = os.path.abspath(subdir)
+        files = os.listdir(subdir) if os.path.exists(subdir) else []
+        if 'translation.json' not in files:
+            fail_list.append(f"{subdir}: 缺少 translation.json")
+            continue
+        if 'audio_combined.wav' in files:
+            logger.info(f'跳过已合成目录: {subdir}')
+            success_list.append(subdir)
+            continue
+        try:
+            generate_wavs(subdir, force_bytedance)
+            success_list.append(subdir)
+        except Exception as e:
+            logger.error(f'Error generating wavs in {subdir}: {e}')
+            fail_list.append(f"{subdir}: {e}")
+    logger.info(f'语音合成完成: 成功 {len(success_list)}/{len(folder_list)}, 失败 {len(fail_list)}')
+    return f'成功: {len(success_list)}\n失败: {len(fail_list)}'
+
 
 if __name__ == '__main__':
     folder = r'videos\TED-Ed\20211214 Would you raise the bird that murdered your children？ - Steve Rothstein'

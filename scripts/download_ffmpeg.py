@@ -116,9 +116,49 @@ def download_file(url, dest_path, resume=True, timeout=30):
         return False
 
 
+def extract_executable(archive_path, dest_dir, exe_name):
+    """
+    从压缩包中提取指定的可执行文件
+    """
+    import zipfile
+    import tarfile
+    
+    archive_path = Path(archive_path)
+    dest_dir = Path(dest_dir)
+    
+    exe_filename = f"{exe_name}.exe" if sys.platform.startswith("win") else exe_name
+    exe_path = dest_dir / exe_filename
+    
+    if archive_path.suffix == ".zip":
+        with zipfile.ZipFile(archive_path, "r") as zf:
+            for info in zf.infolist():
+                if info.filename.endswith(exe_filename):
+                    with zf.open(info) as src, open(exe_path, "wb") as dst:
+                        dst.write(src.read())
+                    print(f"已提取: {exe_filename}")
+                    break
+    elif archive_path.suffix in (".tar", ".gz", ".xz", ".bz2"):
+        with tarfile.open(archive_path, "r:*") as tf:
+            for member in tf.getmembers():
+                if member.name.endswith(exe_filename):
+                    src = tf.extractfile(member)
+                    if src:
+                        with open(exe_path, "wb") as dst:
+                            dst.write(src.read())
+                        print(f"已提取: {exe_filename}")
+                        break
+    
+    if exe_path.exists():
+        if not sys.platform.startswith("win"):
+            os.chmod(exe_path, 0o755)
+        return exe_path
+    
+    return None
+
+
 def extract_ffmpeg(archive_path, dest_dir):
     """
-    从压缩包中提取 ffmpeg 可执行文件
+    从压缩包中提取 ffmpeg 和 ffprobe 可执行文件
     """
     import zipfile
     import tarfile
@@ -128,34 +168,10 @@ def extract_ffmpeg(archive_path, dest_dir):
     
     print(f"解压文件: {archive_path.name}")
     
-    ffmpeg_filename = "ffmpeg.exe" if sys.platform.startswith("win") else "ffmpeg"
-    ffmpeg_path = dest_dir / ffmpeg_filename
+    ffmpeg_path = extract_executable(archive_path, dest_dir, "ffmpeg")
+    ffprobe_path = extract_executable(archive_path, dest_dir, "ffprobe")
     
-    if archive_path.suffix == ".zip":
-        with zipfile.ZipFile(archive_path, "r") as zf:
-            for info in zf.infolist():
-                if info.filename.endswith(ffmpeg_filename):
-                    with zf.open(info) as src, open(ffmpeg_path, "wb") as dst:
-                        dst.write(src.read())
-                    print(f"已提取: {ffmpeg_filename}")
-                    break
-    elif archive_path.suffix in (".tar", ".gz", ".xz", ".bz2"):
-        with tarfile.open(archive_path, "r:*") as tf:
-            for member in tf.getmembers():
-                if member.name.endswith(ffmpeg_filename):
-                    src = tf.extractfile(member)
-                    if src:
-                        with open(ffmpeg_path, "wb") as dst:
-                            dst.write(src.read())
-                        print(f"已提取: {ffmpeg_filename}")
-                        break
-    
-    if ffmpeg_path.exists():
-        if not sys.platform.startswith("win"):
-            os.chmod(ffmpeg_path, 0o755)
-        return ffmpeg_path
-    
-    return None
+    return ffmpeg_path, ffprobe_path
 
 
 def verify_ffmpeg(ffmpeg_path):
@@ -216,7 +232,7 @@ def download_ffmpeg(dest_dir=None, force=False):
     for url in sources:
         print(f"尝试下载: {url}")
         if download_file(url, archive_path, resume=True):
-            ffmpeg_path = extract_ffmpeg(archive_path, dest_dir)
+            ffmpeg_path, ffprobe_path = extract_ffmpeg(archive_path, dest_dir)
             if ffmpeg_path:
                 archive_path.unlink(missing_ok=True)
                 success, version_info = verify_ffmpeg(ffmpeg_path)

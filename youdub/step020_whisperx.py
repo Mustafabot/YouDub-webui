@@ -121,7 +121,7 @@ def load_diarize_model(device='auto'):
         if local_files_only:
             os.environ['HF_HUB_OFFLINE'] = '1'
         diarize_model = DiarizationPipeline(
-            use_auth_token=get_config('HF_TOKEN'),
+            token=get_config('HF_TOKEN'),
             device=device
         )
     except Exception:
@@ -286,6 +286,47 @@ def cleanup_whisperx():
         torch.cuda.synchronize()
     logger.info('WhisperX 模型已清理，显存已释放')
     _log_cuda_memory()
+
+
+def transcribe_audio_in_folders(folder_list, model_name='large', download_root='models/ASR/whisper', device='auto', batch_size=1, diarization=True, min_speakers=None, max_speakers=None):
+    """处理指定目录列表中的语音识别
+
+    Args:
+        folder_list: 需要处理的目录路径列表
+        model_name: Whisper 模型名称
+        download_root: 模型下载目录
+        device: 计算设备
+        batch_size: 批处理大小
+        diarization: 是否启用说话者分离
+        min_speakers: 最小说话人数
+        max_speakers: 最大说话人数
+    """
+    if isinstance(folder_list, str):
+        folder_list = [folder_list]
+    if not os.path.isabs(download_root):
+        download_root = str(PROJECT_ROOT / download_root)
+    success_list = []
+    fail_list = []
+    try:
+        for subdir in folder_list:
+            subdir = os.path.abspath(subdir)
+            if 'audio_vocals.wav' not in os.listdir(subdir):
+                fail_list.append(f"{subdir}: 缺少 audio_vocals.wav")
+                continue
+            if 'transcript.json' in os.listdir(subdir):
+                logger.info(f'Transcript already exists in {subdir}')
+                success_list.append(subdir)
+                continue
+            try:
+                transcribe_audio(subdir, model_name, download_root, device, batch_size, diarization, min_speakers, max_speakers)
+                success_list.append(subdir)
+            except Exception as e:
+                logger.error(f'Error transcribing audio in {subdir}: {e}')
+                fail_list.append(f"{subdir}: {e}")
+        logger.info(f'语音识别完成: 成功 {len(success_list)}/{len(folder_list)}, 失败 {len(fail_list)}')
+        return f'成功: {len(success_list)}\n失败: {len(fail_list)}'
+    finally:
+        cleanup_whisperx()
 
 
 if __name__ == '__main__':

@@ -23,6 +23,10 @@ DEFAULT_CONFIG = {
     "OPENAI_API_TOP_P": 1.0,
     "OPENAI_API_MAX_TOKENS": "",
     "OPENAI_API_EXTRA_BODY": "",
+    "TRANSLATION_SYSTEM_PROMPT": "",
+    "TRANSLATION_FEWSHOT_EXAMPLES": "",
+    "SUMMARY_SYSTEM_PROMPT": "",
+    "SUMMARY_TRANSLATION_PROMPT": "",
     "HF_TOKEN": "",
     "HF_ENDPOINT": "",
     "PIP_INDEX_URL": "",
@@ -33,6 +37,8 @@ DEFAULT_CONFIG = {
     "BILI_BILI_JCT": "",
     "BILI_BASE64": "",
     "FFMPEG_PATH": "",
+    "TTS_STRETCH_MIN_SPEED": 0.6,
+    "TTS_STRETCH_MAX_SPEED": 1.3,
 }
 
 REQUIRED_CONFIG = {
@@ -45,6 +51,7 @@ REQUIRED_CONFIG = {
 }
 
 _ffmpeg_cache = {"path": None, "version": None}
+_ffprobe_cache = {"path": None, "version": None}
 
 
 def get_bundled_ffmpeg_path():
@@ -103,6 +110,53 @@ def get_ffmpeg_path():
     return None
 
 
+def get_ffprobe_path():
+    """
+    获取 FFprobe 可执行文件路径
+    优先级：
+    1. 配置文件中的 FFMPEG_PATH 同目录下的 ffprobe (最高优先级)
+    2. 项目内置 bin/ 目录下的 ffprobe
+    3. 系统 PATH 中的 ffprobe
+    4. 常见安装目录
+    """
+    if _ffprobe_cache["path"] is not None:
+        return _ffprobe_cache["path"]
+    
+    configured_path = get_config("FFMPEG_PATH")
+    if configured_path:
+        configured_path = Path(configured_path)
+        ffprobe_path = configured_path.parent / ("ffprobe.exe" if sys.platform.startswith("win") else "ffprobe")
+        if ffprobe_path.exists() and ffprobe_path.is_file():
+            _ffprobe_cache["path"] = str(ffprobe_path)
+            return _ffprobe_cache["path"]
+    
+    BIN_DIR.mkdir(parents=True, exist_ok=True)
+    ffprobe_filename = "ffprobe.exe" if sys.platform.startswith("win") else "ffprobe"
+    bundled_ffprobe = BIN_DIR / ffprobe_filename
+    
+    if bundled_ffprobe.exists() and bundled_ffprobe.is_file():
+        _ffprobe_cache["path"] = str(bundled_ffprobe)
+        return _ffprobe_cache["path"]
+    
+    system_ffprobe = shutil.which("ffprobe")
+    if system_ffprobe:
+        _ffprobe_cache["path"] = system_ffprobe
+        return _ffprobe_cache["path"]
+    
+    common_paths = [
+        r"C:\Program Files\FFmpeg\bin\ffprobe.exe",
+        r"C:\ffmpeg\bin\ffprobe.exe",
+        "/usr/local/bin/ffprobe",
+        "/usr/bin/ffprobe",
+    ]
+    for path in common_paths:
+        if Path(path).exists():
+            _ffprobe_cache["path"] = path
+            return path
+    
+    return None
+
+
 def get_ffmpeg_version():
     """获取 FFmpeg 版本信息"""
     if _ffmpeg_cache["version"] is not None:
@@ -146,7 +200,22 @@ def check_ffmpeg_available():
     except Exception as e:
         return False, f"FFmpeg 无法执行: {str(e)}。路径: {ffmpeg_path}"
     
-    return True, f"FFmpeg 可用: {ffmpeg_path}"
+    ffprobe_path = get_ffprobe_path()
+    if not ffprobe_path:
+        return False, f"FFprobe 未找到。FFmpeg 可用但缺少 FFprobe。请重新运行自动下载或手动安装完整 FFmpeg 包。FFmpeg 路径: {ffmpeg_path}"
+    
+    try:
+        result = subprocess.run(
+            [ffprobe_path, "-version"],
+            capture_output=True,
+            timeout=5
+        )
+        if result.returncode != 0:
+            return False, f"FFprobe 执行失败，请检查文件完整性。路径: {ffprobe_path}"
+    except Exception as e:
+        return False, f"FFprobe 无法执行: {str(e)}。路径: {ffprobe_path}"
+    
+    return True, f"FFmpeg 可用: {ffmpeg_path}, FFprobe 可用: {ffprobe_path}"
 
 
 def ensure_ffmpeg_available(auto_download=True):
@@ -177,6 +246,8 @@ def ensure_ffmpeg_available(auto_download=True):
         if success:
             _ffmpeg_cache["path"] = None
             _ffmpeg_cache["version"] = None
+            _ffprobe_cache["path"] = None
+            _ffprobe_cache["version"] = None
             return check_ffmpeg_available()
         else:
             return False, f"自动下载失败: {result}。请手动安装 FFmpeg 或在配置中设置 FFMPEG_PATH。"
@@ -306,3 +377,14 @@ def get_config_status():
         }
 
     return status
+
+
+def _init_logging_once():
+    try:
+        from .log_config import init_logging
+        init_logging()
+    except Exception:
+        pass
+
+
+_init_logging_once()

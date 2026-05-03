@@ -190,6 +190,7 @@ class ModuleExecutor:
             },
             "video_synthesis": {
                 "subtitles": params.get("subtitles"),
+                "use_original_audio": params.get("use_original_audio", False),
                 "speed_up": params.get("speed_up"),
                 "fps": params.get("fps"),
                 "resolution": params.get("target_resolution"),
@@ -198,19 +199,30 @@ class ModuleExecutor:
         return param_mapping.get(module_id, {})
 
 
+_default_executor = None
+
+
+def get_default_executor():
+    """获取全局默认执行器（单例）"""
+    global _default_executor
+    if _default_executor is None:
+        _default_executor = create_default_executor()
+    return _default_executor
+
+
 def create_default_executor():
     """创建默认的模块执行器（预先注册所有模块函数）"""
     executor = ModuleExecutor()
     
-    from .step000_video_downloader import download_all_videos_under_folder
-    from .step010_demucs_vr import separate_all_audio_under_folder, init_demucs
-    from .step020_whisperx import transcribe_all_audio_under_folder, init_whisperx
-    from .step030_translation import translate_all_transcript_under_folder
-    from .step040_tts import generate_all_wavs_under_folder
+    from .step000_video_downloader import download_all_videos_under_folder, download_videos_in_folders
+    from .step010_demucs_vr import separate_all_audio_under_folder, separate_audio_in_folders, init_demucs
+    from .step020_whisperx import transcribe_all_audio_under_folder, transcribe_audio_in_folders, init_whisperx
+    from .step030_translation import translate_all_transcript_under_folder, translate_transcripts_in_folders
+    from .step040_tts import generate_all_wavs_under_folder, generate_wavs_in_folders
     from .step043_tts_f5 import init_F5TTS
-    from .step050_synthesize_video import synthesize_all_video_under_folder
-    from .step060_generate_info import generate_all_info_under_folder
-    from .step070_upload_bilibili import upload_all_videos_under_folder
+    from .step050_synthesize_video import synthesize_all_video_under_folder, synthesize_video_in_folders
+    from .step060_generate_info import generate_all_info_under_folder, generate_info_in_folders
+    from .step070_upload_bilibili import upload_all_videos_under_folder, upload_videos_in_folders
     
     executor.register_module_function("video_download", download_all_videos_under_folder)
     executor.register_module_function("audio_separation", separate_all_audio_under_folder, init_demucs)
@@ -220,6 +232,17 @@ def create_default_executor():
     executor.register_module_function("video_synthesis", synthesize_all_video_under_folder)
     executor.register_module_function("generate_info", generate_all_info_under_folder)
     executor.register_module_function("upload_bilibili", upload_all_videos_under_folder)
+    
+    executor._folder_functions = {
+        "video_download": download_videos_in_folders,
+        "audio_separation": separate_audio_in_folders,
+        "speech_recognition": transcribe_audio_in_folders,
+        "translation": translate_transcripts_in_folders,
+        "tts": generate_wavs_in_folders,
+        "video_synthesis": synthesize_video_in_folders,
+        "generate_info": generate_info_in_folders,
+        "upload_bilibili": upload_videos_in_folders,
+    }
     
     return executor
 
