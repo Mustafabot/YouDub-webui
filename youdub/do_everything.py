@@ -172,7 +172,7 @@ def process_video(info, root_folder, resolution, demucs_model, device, shifts, w
     return False
 
 
-def do_everything(root_folder, url=None, local_video_paths=None, num_videos=5, resolution="1080p", demucs_model="htdemucs_ft", device="auto", shifts=5, whisper_model="large", whisper_download_root="models/ASR/whisper", whisper_batch_size=32, whisper_diarization=True, whisper_min_speakers=None, whisper_max_speakers=None, translation_target_language="简体中文", force_bytedance=True, subtitles=True, use_original_audio=False, speed_up=1.05, fps=30, target_resolution="1080p", max_workers=1, max_retries=3, auto_upload_video=False, selected_modules=None, skip_completed=True, selected_files=None, selected_folders=None):
+def do_everything(root_folder, url=None, local_video_paths=None, num_videos=5, resolution="1080p", demucs_model="htdemucs_ft", device="auto", shifts=5, demucs_segment=10, demucs_max_chunk_seconds=600, whisper_model="large", whisper_download_root="models/ASR/whisper", whisper_batch_size=32, whisper_diarization=True, whisper_min_speakers=None, whisper_max_speakers=None, translation_target_language="简体中文", force_bytedance=True, subtitles=True, use_original_audio=False, speed_up=1.05, fps=30, target_resolution="1080p", max_workers=1, max_retries=3, auto_upload_video=False, selected_modules=None, skip_completed=True, selected_files=None, selected_folders=None):
     """
     全自动处理视频
     
@@ -191,6 +191,8 @@ def do_everything(root_folder, url=None, local_video_paths=None, num_videos=5, r
         "demucs_model": demucs_model,
         "device": device,
         "shifts": shifts,
+        "demucs_segment": demucs_segment,
+        "demucs_max_chunk_seconds": demucs_max_chunk_seconds,
         "whisper_model": whisper_model,
         "whisper_download_root": whisper_download_root,
         "whisper_batch_size": whisper_batch_size,

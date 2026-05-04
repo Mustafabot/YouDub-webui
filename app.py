@@ -153,7 +153,10 @@ def format_selected_files_status(selected_files):
 
 def save_settings(openai_api_key, openai_api_base, model_name, temperature, top_p, max_tokens, extra_body,
                   translation_system_prompt, translation_fewshot, summary_system_prompt, summary_translation_prompt,
-                  hf_token, hf_endpoint, pip_index_url, bytedance_appid, bytedance_access_token, bili_sessdata, bili_bili_jct, bili_base64):
+                  hf_token, hf_endpoint, pip_index_url, bytedance_appid, bytedance_access_token,
+                  tts_stretch_min, tts_stretch_max,
+                  bili_sessdata, bili_bili_jct, bili_base64,
+                  ffmpeg_path):
     config = {
         "OPENAI_API_KEY": openai_api_key,
         "OPENAI_API_BASE": openai_api_base,
@@ -171,9 +174,12 @@ def save_settings(openai_api_key, openai_api_base, model_name, temperature, top_
         "PIP_INDEX_URL": pip_index_url,
         "BYTEDANCE_APPID": bytedance_appid,
         "BYTEDANCE_ACCESS_TOKEN": bytedance_access_token,
+        "TTS_STRETCH_MIN_SPEED": tts_stretch_min,
+        "TTS_STRETCH_MAX_SPEED": tts_stretch_max,
         "BILI_SESSDATA": bili_sessdata,
         "BILI_BILI_JCT": bili_bili_jct,
         "BILI_BASE64": bili_base64,
+        "FFMPEG_PATH": ffmpeg_path,
     }
     save_config(config)
     missing = validate_config()
@@ -383,7 +389,7 @@ def _wrap_with_logs(func, *args, **kwargs):
 
 
 def do_everything_wrapper(input_mode, url, local_files, root_folder, num_videos, resolution, translation_target_language, subtitles, use_original_audio, auto_upload_video,
-                          demucs_model, demucs_device, shifts, whisper_model, whisper_batch_size, whisper_diarization,
+                          demucs_model, demucs_device, shifts, demucs_segment, demucs_max_chunk, whisper_model, whisper_batch_size, whisper_diarization, whisper_min_speakers, whisper_max_speakers, whisper_download_root,
                           speed_up, fps, max_workers, max_retries, force_bytedance, selected_modules, skip_completed, use_module_selection, selected_files,
                           de_folder_list_text, de_folder_select_files):
     local_video_paths = None
@@ -444,12 +450,14 @@ def do_everything_wrapper(input_mode, url, local_files, root_folder, num_videos,
             demucs_model=demucs_model,
             device=demucs_device,
             shifts=int(shifts),
+            demucs_segment=int(demucs_segment),
+            demucs_max_chunk_seconds=int(demucs_max_chunk),
             whisper_model=whisper_model,
-            whisper_download_root='models/ASR/whisper',
+            whisper_download_root=whisper_download_root,
             whisper_batch_size=int(whisper_batch_size),
             whisper_diarization=whisper_diarization,
-            whisper_min_speakers=None,
-            whisper_max_speakers=None,
+            whisper_min_speakers=whisper_min_speakers,
+            whisper_max_speakers=whisper_max_speakers,
             translation_target_language=translation_target_language,
             force_bytedance=force_bytedance,
             subtitles=subtitles,
@@ -826,6 +834,13 @@ with gr.Blocks(title='YouDub') as app:
                 bytedance_access_token = gr.Textbox(label='Bytedance Access Token *', type='password',
                     value=_cfg.get('BYTEDANCE_ACCESS_TOKEN', ''),
                     info='火山引擎 TTS 服务的 Access Token')
+                with gr.Row():
+                    tts_stretch_min = gr.Slider(label='TTS 最小拉伸速度', minimum=0.3, maximum=1.0, step=0.05,
+                        value=float(_cfg.get('TTS_STRETCH_MIN_SPEED', 0.6)),
+                        info='TTS 音频拉伸的最小速度因子，值越小越慢')
+                    tts_stretch_max = gr.Slider(label='TTS 最大拉伸速度', minimum=1.0, maximum=2.0, step=0.05,
+                        value=float(_cfg.get('TTS_STRETCH_MAX_SPEED', 1.3)),
+                        info='TTS 音频拉伸的最大速度因子，值越大越快')
             with gr.Accordion("B站上传", open=True):
                 bili_sessdata = gr.Textbox(label='BiliBili SESSDATA *', type='password',
                     value=_cfg.get('BILI_SESSDATA', ''),
@@ -836,6 +851,11 @@ with gr.Blocks(title='YouDub') as app:
                 bili_base64 = gr.Textbox(label='BiliBili Cover Base64',
                     value=_cfg.get('BILI_BASE64', ''),
                     info='B站视频封面的 Base64 编码，可选')
+            with gr.Accordion("FFmpeg 设置", open=False):
+                ffmpeg_path = gr.Textbox(label='FFmpeg 路径',
+                    value=_cfg.get('FFMPEG_PATH', ''),
+                    placeholder='留空则自动检测',
+                    info='FFmpeg 可执行文件路径，留空则使用系统 PATH 或项目内置 FFmpeg')
             with gr.Accordion("模型管理", open=True):
                 gr.Markdown(
                     "管理 YouDub 全流程所需的本地 AI 模型。首次使用前请先下载所需模型。\n\n"
@@ -866,7 +886,10 @@ with gr.Blocks(title='YouDub') as app:
                 fn=save_settings,
                 inputs=[openai_api_key, openai_api_base, model_name, temperature, top_p, max_tokens, extra_body,
                         translation_system_prompt, translation_fewshot, summary_system_prompt, summary_translation_prompt,
-                        hf_token, hf_endpoint, pip_index_url, bytedance_appid, bytedance_access_token, bili_sessdata, bili_bili_jct, bili_base64],
+                        hf_token, hf_endpoint, pip_index_url, bytedance_appid, bytedance_access_token,
+                        tts_stretch_min, tts_stretch_max,
+                        bili_sessdata, bili_bili_jct, bili_base64,
+                        ffmpeg_path],
                 outputs=[save_result, status_display]
             )
         with gr.Tab('全自动'):
@@ -1047,12 +1070,24 @@ with gr.Blocks(title='YouDub') as app:
                             info='音频分离的计算设备')
                 de_shifts = gr.Slider(minimum=0, maximum=10, step=1, label='Number of shifts', value=5,
                          info='音频分离的移位数，越大质量越好但越慢')
+                de_demucs_segment = gr.Slider(minimum=5, maximum=30, step=1, label='内部段长 (秒)', value=10,
+                         info='Demucs 内部分段推理长度，越小显存占用越低')
+                de_demucs_max_chunk = gr.Slider(minimum=120, maximum=1800, step=60, label='最大分块 (秒)', value=600,
+                         info='长音频外部分块大小，越小内存占用越低')
                 de_whisper_model = gr.Radio(['large', 'medium', 'small', 'base', 'tiny'], label='Whisper Model', value='large',
                             info='语音识别模型，large 最准确但最慢')
                 de_whisper_batch_size = gr.Slider(minimum=1, maximum=128, step=1, label='Whisper Batch Size', value=32,
                               info='语音识别的批处理大小')
                 de_whisper_diarization = gr.Checkbox(label='Whisper Diarization', value=True,
                                  info='启用说话者分离，区分不同说话人')
+                de_whisper_min_speakers = gr.Radio([None, 1, 2, 3, 4, 5, 6, 7, 8, 9],
+                               label='Min Speakers', value=None,
+                               info='说话者分离的最小说话人数')
+                de_whisper_max_speakers = gr.Radio([None, 1, 2, 3, 4, 5, 6, 7, 8, 9],
+                               label='Max Speakers', value=None,
+                               info='说话者分离的最大说话人数')
+                de_whisper_download_root = gr.Textbox(label='Whisper Download Root', value='models/ASR/whisper',
+                               info='Whisper 模型下载/加载路径')
                 de_speed_up = gr.Slider(minimum=0.5, maximum=2, step=0.05, label='Speed Up', value=1.05,
                         info='视频加速倍率，1.0 为原速')
                 de_fps = gr.Slider(minimum=1, maximum=60, step=1, label='FPS', value=30,
@@ -1082,7 +1117,9 @@ with gr.Blocks(title='YouDub') as app:
                 fn=do_everything_wrapper,
                 inputs=[de_input_mode, de_url, de_local_files, de_root_folder, de_num_videos, de_resolution, de_translation_target_language,
                         de_subtitles, de_use_original_audio, de_auto_upload, de_demucs_model, de_demucs_device, de_shifts,
+                        de_demucs_segment, de_demucs_max_chunk,
                         de_whisper_model, de_whisper_batch_size, de_whisper_diarization,
+                        de_whisper_min_speakers, de_whisper_max_speakers, de_whisper_download_root,
                         de_speed_up, de_fps, de_max_workers, de_max_retries, de_force_bytedance,
                         de_selected_modules, de_skip_completed, de_use_module_selection, de_selected_files,
                         de_folder_list_text, de_folder_select_files],
