@@ -23,6 +23,20 @@ def _log_cuda_memory(logger_func=logger.info):
     logger_func(f'CUDA 显存: 已分配={allocated:.2f}GB, 已预留={reserved:.2f}GB, 空闲={free:.2f}GB, 总计={total:.2f}GB')
 
 
+def _get_default_batch_size():
+    if not torch.cuda.is_available():
+        return 1
+    total_vram_gb = torch.cuda.get_device_properties(0).total_memory / 1024**3
+    if total_vram_gb >= 24:
+        return 32
+    elif total_vram_gb >= 16:
+        return 16
+    elif total_vram_gb >= 8:
+        return 8
+    else:
+        return 4
+
+
 @contextmanager
 def _ffmpeg_in_path():
     ffmpeg_path = get_ffmpeg_path()
@@ -155,7 +169,9 @@ def merge_segments(transcript, ending='!"\').:;?]}~'):
 
     return merged_transcription
 
-def transcribe_audio(folder, model_name: str = 'large', download_root='models/ASR/whisper', device='auto', batch_size=32, diarization=True,min_speakers=None, max_speakers=None):
+def transcribe_audio(folder, model_name: str = 'large', download_root='models/ASR/whisper', device='auto', batch_size=None, diarization=True,min_speakers=None, max_speakers=None):
+    if batch_size is None:
+        batch_size = _get_default_batch_size()
     if os.path.exists(os.path.join(folder, 'transcript.json')):
         logger.info(f'Transcript already exists in {folder}')
         return True
@@ -214,27 +230,30 @@ def transcribe_audio(folder, model_name: str = 'large', download_root='models/AS
 def generate_speaker_audio(folder, transcript):
     wav_path = os.path.join(folder, 'audio_vocals.wav')
     audio_data, samplerate = librosa.load(wav_path, sr=24000)
-    speaker_dict = dict()
+    speaker_segments = {}
     length = len(audio_data)
     delay = 0.05
     for segment in transcript:
         start = max(0, int((segment['start'] - delay) * samplerate))
-        end = min(int((segment['end']+delay) * samplerate), length)
-        speaker_segment_audio = audio_data[start:end]
-        speaker_dict[segment['speaker']] = np.concatenate((speaker_dict.get(
-            segment['speaker'], np.zeros((0, ))), speaker_segment_audio))
+        end = min(int((segment['end'] + delay) * samplerate), length)
+        speaker = segment['speaker']
+        if speaker not in speaker_segments:
+            speaker_segments[speaker] = []
+        speaker_segments[speaker].append(audio_data[start:end])
 
     speaker_folder = os.path.join(folder, 'SPEAKER')
     if not os.path.exists(speaker_folder):
         os.makedirs(speaker_folder)
     
-    for speaker, audio in speaker_dict.items():
+    for speaker, segments in speaker_segments.items():
         speaker_file_path = os.path.join(
             speaker_folder, f"{speaker}.wav")
-        save_wav(audio, speaker_file_path)
+        save_wav(np.concatenate(segments), speaker_file_path)
             
 
-def transcribe_all_audio_under_folder(folder, model_name: str = 'large', download_root='models/ASR/whisper', device='auto', batch_size=1, diarization=True, min_speakers=None, max_speakers=None):
+def transcribe_all_audio_under_folder(folder, model_name: str = 'large', download_root='models/ASR/whisper', device='auto', batch_size=None, diarization=True, min_speakers=None, max_speakers=None):
+    if batch_size is None:
+        batch_size = _get_default_batch_size()
     if not os.path.isabs(folder):
         folder = str(PROJECT_ROOT / folder)
     if not os.path.isabs(download_root):
@@ -288,7 +307,7 @@ def cleanup_whisperx():
     _log_cuda_memory()
 
 
-def transcribe_audio_in_folders(folder_list, model_name='large', download_root='models/ASR/whisper', device='auto', batch_size=1, diarization=True, min_speakers=None, max_speakers=None):
+def transcribe_audio_in_folders(folder_list, model_name='large', download_root='models/ASR/whisper', device='auto', batch_size=None, diarization=True, min_speakers=None, max_speakers=None):
     """处理指定目录列表中的语音识别
 
     Args:
@@ -296,11 +315,13 @@ def transcribe_audio_in_folders(folder_list, model_name='large', download_root='
         model_name: Whisper 模型名称
         download_root: 模型下载目录
         device: 计算设备
-        batch_size: 批处理大小
+        batch_size: 批处理大小，None 时根据显存自动选择
         diarization: 是否启用说话者分离
         min_speakers: 最小说话人数
         max_speakers: 最大说话人数
     """
+    if batch_size is None:
+        batch_size = _get_default_batch_size()
     if isinstance(folder_list, str):
         folder_list = [folder_list]
     if not os.path.isabs(download_root):

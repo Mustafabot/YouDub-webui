@@ -172,6 +172,8 @@ class ModuleExecutor:
                 "device": params.get("device"),
                 "progress": True,
                 "shifts": params.get("shifts"),
+                "segment": params.get("demucs_segment", 10),
+                "max_chunk_seconds": params.get("demucs_max_chunk_seconds", 600),
             },
             "speech_recognition": {
                 "model_name": params.get("whisper_model"),

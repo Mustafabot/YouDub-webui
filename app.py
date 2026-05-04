@@ -481,14 +481,15 @@ def do_everything_wrapper(input_mode, url, local_files, root_folder, num_videos,
         return error_result
 
 
-def demucs_wrapper(folder, model, device, progress, shifts, folder_list_text=None, folder_select_files=None):
+def demucs_wrapper(folder, model, device, progress, shifts, segment, max_chunk_seconds, folder_list_text=None, folder_select_files=None):
     selected_folders = merge_folder_lists(folder_list_text, folder_select_files)
     if selected_folders:
         clear_log_buffer()
         try:
             from youdub.step010_demucs_vr import separate_audio_in_folders, cleanup_demucs
             result = separate_audio_in_folders(
-                selected_folders, model_name=model, device=device, progress=progress, shifts=int(shifts)
+                selected_folders, model_name=model, device=device, progress=progress, shifts=int(shifts),
+                segment=int(segment), max_chunk_seconds=int(max_chunk_seconds)
             )
             output = f"✅ {result}" if result and not str(result).startswith("❌") else result
             logs = get_log_buffer()
@@ -520,7 +521,8 @@ def demucs_wrapper(folder, model, device, progress, shifts, folder_list_text=Non
     clear_log_buffer()
     try:
         result = separate_all_audio_under_folder(
-            folder, model_name=model, device=device, progress=progress, shifts=int(shifts)
+            folder, model_name=model, device=device, progress=progress, shifts=int(shifts),
+            segment=int(segment), max_chunk_seconds=int(max_chunk_seconds)
         )
         output = f"✅ {result}" if result and not str(result).startswith("❌") else result
         logs = get_log_buffer()
@@ -1158,11 +1160,13 @@ with gr.Blocks(title='YouDub') as app:
                 dm_device = gr.Radio(['auto', 'cuda', 'cpu'], label='Device', value='auto')
                 dm_progress = gr.Checkbox(label='Progress Bar in Console', value=True)
                 dm_shifts = gr.Slider(minimum=0, maximum=10, step=1, label='Number of shifts', value=5)
+                dm_segment = gr.Slider(minimum=5, maximum=30, step=1, label='内部段长 (秒)', value=10, info='Demucs 内部分段推理长度，越小显存占用越低')
+                dm_max_chunk = gr.Slider(minimum=120, maximum=1800, step=60, label='最大分块 (秒)', value=600, info='长音频外部分块大小，越小内存占用越低，0表示不限制')
             dm_output = gr.Textbox(label='输出')
             dm_btn = gr.Button("开始分离", variant="primary")
             dm_btn.click(
                 fn=demucs_wrapper,
-                inputs=[dm_folder, dm_model, dm_device, dm_progress, dm_shifts, dm_folder_list_text, dm_folder_select_files],
+                inputs=[dm_folder, dm_model, dm_device, dm_progress, dm_shifts, dm_segment, dm_max_chunk, dm_folder_list_text, dm_folder_select_files],
                 outputs=dm_output
             )
         with gr.Tab('语音识别'):
