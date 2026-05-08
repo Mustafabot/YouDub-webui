@@ -16,7 +16,7 @@ from loguru import logger
 from pyannote.audio import Model, Inference
 from scipy.spatial.distance import cosine
 
-from .config import get_config, get_hf_local_files_only
+from .config import get_config, get_hf_local_files_only, MODEL_ROOT
 
 host = "openspeech.bytedance.com"
 api_url = f"https://{host}/api/v1/tts"
@@ -69,6 +69,7 @@ def load_embedding_model():
             loaded_model = Model.from_pretrained(
                 "pyannote/embedding", 
                 token=hf_token if hf_token else None,
+                cache_dir=str(MODEL_ROOT / "huggingface" / "hub"),
                 local_files_only=True
             )
         else:
@@ -79,7 +80,8 @@ def load_embedding_model():
             logger.info('正在加载 pyannote/embedding 模型...')
             loaded_model = Model.from_pretrained(
                 "pyannote/embedding", 
-                token=hf_token
+                token=hf_token,
+                cache_dir=str(MODEL_ROOT / "huggingface" / "hub"),
             )
         
         if loaded_model is not None:

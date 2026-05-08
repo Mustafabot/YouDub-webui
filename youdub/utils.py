@@ -58,7 +58,7 @@ def _detect_best_mirror() -> Optional[str]:
     return None
 
 
-def install_package_with_mirrors(package_spec: str, timeout: int = 300) -> bool:
+def install_package_with_mirrors(package_spec: str, timeout: int = 300, extra_args: list = None) -> bool:
     pip_index_url = os.environ.get("PIP_INDEX_URL", "")
     if pip_index_url:
         mirrors_to_try = [("用户配置", pip_index_url, "")]
@@ -76,6 +76,8 @@ def install_package_with_mirrors(package_spec: str, timeout: int = 300) -> bool:
                 cmd.extend(["-i", index_url, "--timeout", "60"])
                 if host:
                     cmd.extend(["--trusted-host", host])
+                if extra_args:
+                    cmd.extend(extra_args)
                 logger.info(f"[{name}] 安装 {package_spec} (尝试 {attempt}/2)...")
                 result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
                 if result.returncode == 0:

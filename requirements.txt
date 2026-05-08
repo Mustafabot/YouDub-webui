@@ -16,4 +16,4 @@ numpy>=1.22,<2.4
 numba>=0.63
 
 # Optional dependencies (installed by setup_windows.bat, can be installed manually if needed):
-# TTS  - IndexTTS library, install with: pip install indextts
+# TTS  - IndexTTS library, install with: pip install git+https://github.com/index-tts/index-tts.git

@@ -7,7 +7,7 @@ import time
 import gc
 import numpy as np
 from .utils import save_wav, normalize_wav
-from .config import ensure_ffmpeg_available, get_ffmpeg_path, PROJECT_ROOT
+from .config import ensure_ffmpeg_available, get_ffmpeg_path, PROJECT_ROOT, MODEL_ROOT
 import torch
 import wave
 
@@ -38,6 +38,7 @@ def load_model(model_name: str = "htdemucs_ft", device: str = 'auto', progress: 
     logger.info(f'Loading Demucs model: {model_name} (device={device}, shifts={shifts}, segment={segment}s)')
     t_start = time.time()
     effective_device = auto_device if device=='auto' else device
+    torch.hub.set_dir(str(MODEL_ROOT / "demucs"))
     separator = Separator(model_name, device=effective_device, progress=progress, shifts=shifts, segment=segment)
     t_end = time.time()
     logger.info(f'Demucs model loaded in {t_end - t_start:.2f} seconds')

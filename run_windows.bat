@@ -3,8 +3,8 @@ SETLOCAL EnableDelayedExpansion
 
 cd /d "%~dp0"
 IF %ERRORLEVEL% NEQ 0 (
-    echo [错误] 无法切换到脚本目录: "%~dp0"
-    echo 请确认从本地磁盘运行此脚本，不要使用网络路径。
+    echo [ERROR] Failed to change to script directory: "%~dp0"
+    echo Please run this script from a local drive, not a network path.
     pause
     EXIT /B 1
 )
@@ -25,37 +25,37 @@ echo.
 echo [1/6] Checking virtual environment...
 IF NOT EXIST "venv\Scripts\activate.bat" (
     echo.
-    echo [错误] 未找到虚拟环境
+    echo [ERROR] Virtual environment not found.
     echo.
     echo ============================================
-    echo   解决方案
-    echo   1. 请先运行 setup_windows.bat 安装依赖
-    echo   2. 确认 setup_windows.bat 是否成功完成
-    echo   3. 检查是否有权限创建 venv 目录
+    echo   Troubleshooting
+    echo   1. Run setup_windows.bat first to install dependencies
+    echo   2. Verify setup_windows.bat completed successfully
+    echo   3. Check permissions to create the venv directory
     echo ============================================
     echo.
     echo [%date% %time%] ERROR: Virtual environment not found >> "%LOGFILE%"
     pause
     EXIT /B 1
 )
-echo        虚拟环境存在。
+echo        Virtual environment found.
 echo [%date% %time%] Virtual environment found >> "%LOGFILE%"
 
 :: ============================================
 :: [2/6] Activate virtual environment
 :: ============================================
 echo.
-echo [2/6] 激活虚拟环境...
+echo [2/6] Activating virtual environment...
 CALL venv\Scripts\activate.bat
 IF %ERRORLEVEL% NEQ 0 (
     echo.
-    echo [错误] 虚拟环境激活失败。
+    echo [ERROR] Failed to activate virtual environment.
     echo.
     echo ============================================
-    echo   解决方案
-    echo   1. 删除 venv 文件夹，重新运行 setup_windows.bat
-    echo   2. 检查 Python 安装是否完整
-    echo   3. 以管理员权限运行脚本
+    echo   Troubleshooting
+    echo   1. Delete the venv folder, then re-run setup_windows.bat
+    echo   2. Verify your Python installation is working
+    echo   3. Run this script as Administrator
     echo ============================================
     echo.
     echo [%date% %time%] ERROR: Failed to activate virtual environment >> "%LOGFILE%"
@@ -64,36 +64,36 @@ IF %ERRORLEVEL% NEQ 0 (
 )
 IF NOT DEFINED VIRTUAL_ENV (
     echo.
-    echo [错误] 虚拟环境激活失败，环境变量未设置。
+    echo [ERROR] Virtual environment activation failed: VIRTUAL_ENV not set.
     echo.
     echo ============================================
-    echo   解决方案
-    echo   1. 重新运行 setup_windows.bat
-    echo   2. 检查是否有杀毒软件拦截
+    echo   Troubleshooting
+    echo   1. Re-run setup_windows.bat
+    echo   2. Check if antivirus is blocking activation
     echo ============================================
     echo.
     echo [%date% %time%] ERROR: VIRTUAL_ENV not set after activation >> "%LOGFILE%"
     pause
     EXIT /B 1
 )
-echo        虚拟环境已激活。
+echo        Virtual environment activated.
 echo [%date% %time%] Virtual environment activated >> "%LOGFILE%"
 
 :: ============================================
 :: [3/6] Check Python version
 :: ============================================
 echo.
-echo [3/6] 检查 Python 版本...
+echo [3/6] Checking Python version...
 python --version >nul 2>&1
 IF %ERRORLEVEL% NEQ 0 (
     echo.
-    echo [错误] 虚拟环境中 Python 不可用。
+    echo [ERROR] Python is not available in the virtual environment.
     echo.
     echo ============================================
-    echo   解决方案
-    echo   1. 删除 venv 文件夹
-    echo   2. 重新运行 setup_windows.bat
-    echo   3. 确认系统已安装 Python 3.8+
+    echo   Troubleshooting
+    echo   1. Delete the venv folder
+    echo   2. Re-run setup_windows.bat
+    echo   3. Verify Python 3.8+ is installed on your system
     echo ============================================
     echo.
     echo [%date% %time%] ERROR: Python not available >> "%LOGFILE%"
@@ -108,7 +108,7 @@ for /f "tokens=*" %%i in ('python -c "import sys; ver=sys.version.split()[0].spl
     set PYMINOR=%%i
   )
 )
-echo        检查 Python %PYMAJOR%.%PYMINOR%.x
+echo        Found Python %PYMAJOR%.%PYMINOR%.x
 
 :: Check via batch comparison (avoids cmd.exe > parsing issue with Python inline code)
 set VERSION_OK=0
@@ -116,42 +116,42 @@ if !PYMAJOR! GEQ 4 set VERSION_OK=1
 if !PYMAJOR! EQU 3 if !PYMINOR! GEQ 8 set VERSION_OK=1
 if not !VERSION_OK! EQU 0 goto VERSION_PASS
 echo.
-echo [错误] Python 版本过低。
+echo [ERROR] Python version is too old.
 echo.
 echo ============================================
-echo   当前版本: %PYMAJOR%.%PYMINOR%
-echo   要求版本: 3.8 或更高
+echo   Current version: %PYMAJOR%.%PYMINOR%
+echo   Required version: 3.8 or higher
 echo.
-echo   解决方案：
-echo   1. 从 https://www.python.org/downloads/ 下载最新 Python
-echo   2. 安装时勾选 "Add Python to PATH"
-echo   3. 重新运行 setup_windows.bat
+echo   Troubleshooting
+echo   1. Download the latest Python from https://www.python.org/downloads/
+echo   2. Select "Add Python to PATH" during installation
+echo   3. Re-run setup_windows.bat
 echo ============================================
 echo.
 echo [%date% %time%] ERROR: Python %PYMAJOR%.%PYMINOR% is too old (requires 3.8+) >> "%LOGFILE%"
 pause
 EXIT /B 1
 :VERSION_PASS
-echo        Python 版本符合要求。
+echo        Python version check passed.
 echo [%date% %time%] Python %PYMAJOR%.%PYMINOR% version check passed >> "%LOGFILE%"
 
 :: ============================================
 :: [4/6] Check critical dependencies
 :: ============================================
 echo.
-echo [4/6] 检查依赖项...
+echo [4/6] Checking dependencies...
 
-echo        检查 gradio...
+echo        Checking gradio...
 python -c "import gradio; print(f'Gradio {gradio.__version__}')" >nul 2>&1
 IF %ERRORLEVEL% NEQ 0 (
     echo.
-    echo [错误] Gradio 未安装或损坏。
+    echo [ERROR] Gradio is not installed or is corrupted.
     echo.
     echo ============================================
-    echo   解决方案
-    echo   1. 运行 setup_windows.bat 重新安装依赖
-    echo   2. 或手动执行: pip install gradio
-    echo   3. 检查网络连接和 pip 镜像配置
+    echo   Troubleshooting
+    echo   1. Run setup_windows.bat to reinstall dependencies
+    echo   2. Or manually: pip install gradio
+    echo   3. Check network connection and retry pip install
     echo ============================================
     echo.
     echo [%date% %time%] ERROR: Gradio not installed >> "%LOGFILE%"
@@ -159,43 +159,42 @@ IF %ERRORLEVEL% NEQ 0 (
     EXIT /B 1
 )
 for /f "tokens=*" %%i in ('python -c "import gradio; print(gradio.__version__)"') do set GRADIO_VER=%%i
-echo        Gradio %GRADIO_VER% 已安装
+echo        Gradio %GRADIO_VER% installed
 
-echo        检查 torch...
+echo        Checking torch...
 python -c "import torch; print(f'Torch {torch.__version__}')" >nul 2>&1
 IF %ERRORLEVEL% NEQ 0 (
     echo.
-    echo [错误] PyTorch 未安装或损坏。
-    echo        部分功能可能无法正常运行。
+    echo [WARNING] PyTorch is not installed or is corrupted.
+    echo        Some features may not work properly.
     echo.
-    echo   解决方案
-    echo   运行 setup_windows.bat 重新安装 PyTorch
+    echo   Troubleshooting
+    echo   Run setup_windows.bat to reinstall PyTorch
     echo.
     echo [%date% %time%] WARNING: PyTorch not found >> "%LOGFILE%"
 ) else (
     for /f "tokens=*" %%i in ('python -c "import torch; print(torch.__version__)"') do set TORCH_VER=%%i
-    echo        PyTorch %TORCH_VER% 已安装
+    echo        PyTorch %TORCH_VER% installed
     echo [%date% %time%] PyTorch %TORCH_VER% found >> "%LOGFILE%"
 )
-echo        依赖项检查完成。
+echo        Dependency check complete.
 echo [%date% %time%] Critical dependencies check passed >> "%LOGFILE%"
 
 :: ============================================
 :: [5/6] Check configuration
 :: ============================================
 echo.
-echo [5/6] 检查配置文件...
+echo [5/6] Checking configuration file...
 IF NOT EXIST ".env" (
-    echo [警告] 未找到 .env 配置文件。
-    echo        将使用默认配置，部分功能可能受限。
+    echo [WARNING] .env configuration file not found.
+    echo        Default settings will be used. Some features may be limited.
     echo.
-    echo   提示：
-    echo   可从 .env.example 复制创建 .env 文件
-    echo   并填入需要的 API 密钥
+    echo   Tip
+    echo   Copy .env.example to .env and fill in the required API keys
     echo.
     echo [%date% %time%] WARNING: .env file not found >> "%LOGFILE%"
 ) else (
-    echo        .env 配置文件存在。
+    echo        .env configuration file found.
     echo [%date% %time%] .env file found >> "%LOGFILE%"
 )
 
@@ -203,7 +202,7 @@ IF NOT EXIST ".env" (
 :: [6/6] Prepare to launch
 :: ============================================
 echo.
-echo [6/6] 准备启动应用...
+echo [6/6] Preparing to launch application...
 
 :: Handle share mode via environment variable
 set SHARE_FLAG=
@@ -212,21 +211,21 @@ if "%YOUDUB_SHARE%"=="1" (
 )
 
 if "!SHARE_FLAG!"=="1" (
-    echo        分享模式已开启 (YOUDUB_SHARE=1^)
-    echo        将生成公网 URL 供远程访问。
+    echo        Share mode enabled (YOUDUB_SHARE=1)
+    echo        A public URL will be provided for remote access
     echo [%date% %time%] Share mode enabled >> "%LOGFILE%"
 )
 
 echo.
 echo ============================================
-echo   启动完成：
+echo   Ready to launch!
 echo ============================================
 echo.
-echo   访问地址: http://127.0.0.1:19876
-echo   停止应用: 按 Ctrl+C
+echo   URL: http://127.0.0.1:19876
+echo   Stop: Press Ctrl+C
 echo.
 if "!SHARE_FLAG!"=="1" (
-echo   分享模式: 启用，将显示公网 URL。
+echo   Share mode: Enabled - external URL will be shown after launch
 echo.
 )
 echo ============================================
@@ -249,16 +248,16 @@ if "!SHARE_FLAG!"=="1" (
 IF %ERRORLEVEL% NEQ 0 (
     echo.
     echo ============================================
-    echo   [错误] 应用程序异常退出
+    echo   [ERROR] Application exited unexpectedly
     echo ============================================
     echo.
-    echo   请查看上方的错误信息了解详情。
+    echo   See error messages above for details.
     echo.
-    echo   常见解决方案：
-    echo   1. 检查端口 19876 是否被占用
-    echo   2. 查看 run.log 了解详细日志
-    echo   3. 运行 setup_windows.bat 重新安装依赖
-    echo   4. 确认 .env 配置是否正确
+    echo   Possible causes
+    echo   1. Check if port 19876 is already in use
+    echo   2. Check run.log for detailed logs
+    echo   3. Run setup_windows.bat to reinstall dependencies
+    echo   4. Verify .env configuration is correct
     echo.
     echo [%date% %time%] ERROR: Application exited with error code %ERRORLEVEL% >> "%LOGFILE%"
     echo.
@@ -268,8 +267,8 @@ IF %ERRORLEVEL% NEQ 0 (
 
 echo.
 echo ============================================
-echo   应用程序已正常退出
--echo ============================================
+echo   Application exited normally
+echo ============================================
 echo.
 echo [%date% %time%] Application exited normally >> "%LOGFILE%"
 echo.

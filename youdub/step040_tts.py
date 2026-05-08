@@ -120,12 +120,12 @@ def generate_wavs(folder, force_bytedance=False):
     else:
         if has_bytedance_config:
             use_bytedance = True
-            logger.warning('IndexTTS 未安装 (pip install indextts)，将使用火山引擎 TTS')
+            logger.warning('IndexTTS 未安装，将使用火山引擎 TTS。可在 WebUI「模型管理」中一键安装')
         else:
             raise RuntimeError(
                 '所有 TTS 引擎均不可用。请至少配置一种 TTS 方式：\n'
                 '1. 配置火山引擎 TTS (BYTEDANCE_APPID + BYTEDANCE_ACCESS_TOKEN)\n'
-                '2. 安装 IndexTTS (pip install indextts) 并下载模型'
+                '2. 在 WebUI 设置页「模型管理」中下载 IndexTTS 模型（自动安装库+模型）'
             )
 
     speaker_folder = os.path.join(folder, 'SPEAKER')

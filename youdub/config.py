@@ -11,6 +11,7 @@ from dotenv import load_dotenv
 CONFIG_FILE = Path(__file__).parent / "config.json"
 ENV_FILE = Path(__file__).parent.parent / ".env"
 PROJECT_ROOT = Path(__file__).parent.parent
+MODEL_ROOT = PROJECT_ROOT / "models"
 BIN_DIR = PROJECT_ROOT / "bin"
 
 load_dotenv(ENV_FILE, override=True)
@@ -39,7 +40,7 @@ DEFAULT_CONFIG = {
     "FFMPEG_PATH": "",
     "TTS_STRETCH_MIN_SPEED": 0.6,
     "TTS_STRETCH_MAX_SPEED": 1.3,
-    "INDEXTTS_MODEL_DIR": "checkpoints",
+    "INDEXTTS_MODEL_DIR": "models/index-tts",
     "INDEXTTS_USE_FP16": True,
     "INDEXTTS_USE_DEEPSPEED": False,
 }

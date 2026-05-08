@@ -5,21 +5,21 @@ import io
 from loguru import logger
 import torch
 import time
-from .config import get_config, PROJECT_ROOT
+from .config import get_config, PROJECT_ROOT, MODEL_ROOT
 
 try:
     from indextts.infer_v2 import IndexTTS2
     INDEXTTS_AVAILABLE = True
 except ImportError:
     INDEXTTS_AVAILABLE = False
-    logger.warning("indextts library not available. Please install with: pip install indextts")
+    logger.warning("indextts library not available. Install from GitHub: pip install git+https://github.com/index-tts/index-tts.git")
 
 model = None
 model_config = None
 
 
 def _detect_tts_config(device='auto'):
-    model_dir = get_config('INDEXTTS_MODEL_DIR', 'checkpoints')
+    model_dir = get_config('INDEXTTS_MODEL_DIR', 'models/index-tts')
     if not os.path.isabs(model_dir):
         model_dir = str(PROJECT_ROOT / model_dir)
     use_fp16 = get_config('INDEXTTS_USE_FP16', 'true').lower() in ('true', '1', 'yes')
@@ -54,7 +54,10 @@ def load_model(device='auto', use_fp16=None, use_deepspeed=None):
         return
 
     if not INDEXTTS_AVAILABLE:
-        raise RuntimeError("IndexTTS 未安装，请执行 pip install indextts 进行安装")
+        raise RuntimeError(
+            "IndexTTS 未安装。请在 WebUI 设置页「模型管理」中点击「下载全部缺失模型」自动安装，\n"
+            "或手动执行: pip install git+https://github.com/index-tts/index-tts.git"
+        )
 
     config = _detect_tts_config(device)
     if use_fp16 is not None:
@@ -116,7 +119,10 @@ def _log_cuda_memory():
 def tts(text, output_path, speaker_wav, device='auto'):
     global model
     if not INDEXTTS_AVAILABLE:
-        raise RuntimeError("IndexTTS 未安装，请执行 pip install indextts 进行安装")
+        raise RuntimeError(
+            "IndexTTS 未安装。请在 WebUI 设置页「模型管理」中点击「下载全部缺失模型」自动安装，\n"
+            "或手动执行: pip install git+https://github.com/index-tts/index-tts.git"
+        )
 
     if not os.path.exists(speaker_wav):
         raise FileNotFoundError(f'参考音频不存在: {speaker_wav}，请确认说话人分离步骤已正确执行')

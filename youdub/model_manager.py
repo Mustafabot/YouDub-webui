@@ -6,7 +6,7 @@ import subprocess
 from pathlib import Path
 from loguru import logger
 
-from .config import get_config, PROJECT_ROOT
+from .config import get_config, PROJECT_ROOT, MODEL_ROOT
 from .utils import install_package_with_mirrors
 
 
@@ -31,15 +31,10 @@ def _check_indextts_package_installed() -> bool:
         return False
 
 
-_HF_HOME = os.environ.get("HF_HOME", os.path.join(os.path.expanduser("~"), ".cache", "huggingface"))
-HF_CACHE_DIR = Path(os.environ.get("HUGGINGFACE_HUB_CACHE", os.path.join(_HF_HOME, "hub")))
+WHISPER_DOWNLOAD_ROOT = str(MODEL_ROOT / "whisper")
 
-TORCH_HUB_DIR = Path(os.environ.get(
-    "TORCH_HOME",
-    os.path.join(os.path.expanduser("~"), ".cache", "torch")
-)) / "hub"
-
-WHISPER_DOWNLOAD_ROOT = str(PROJECT_ROOT / "models" / "ASR" / "whisper")
+DEMUCS_MODEL_DIR = MODEL_ROOT / "demucs"
+HF_CACHE_DIR = str(MODEL_ROOT / "huggingface" / "hub")
 
 
 def _apply_hf_endpoint():
@@ -71,20 +66,6 @@ def _snapshot_download_with_retry(repo_id, max_retries=3, **kwargs):
     return None
 
 
-def _check_hf_model_cached(org: str, name: str) -> bool:
-    model_dir = HF_CACHE_DIR / f"models--{org}--{name}"
-    if not model_dir.exists():
-        return False
-    refs_dir = model_dir / "refs"
-    snapshots_dir = model_dir / "snapshots"
-    if not refs_dir.exists() or not snapshots_dir.exists():
-        return False
-    refs = list(refs_dir.iterdir())
-    if not refs:
-        return False
-    return True
-
-
 def _check_whisper_model_cached() -> bool:
     model_dir = Path(WHISPER_DOWNLOAD_ROOT) / "models--Systran--faster-whisper-large-v3"
     if not model_dir.exists():
@@ -109,7 +90,7 @@ def _check_demucs_model_cached() -> bool:
             return False
         if isinstance(sigs, str):
             sigs = [sigs]
-        checkpoints_dir = TORCH_HUB_DIR / "checkpoints"
+        checkpoints_dir = DEMUCS_MODEL_DIR / "checkpoints"
         if not checkpoints_dir.exists():
             return False
         for sig in sigs:
@@ -127,7 +108,7 @@ def _check_demucs_model_cached() -> bool:
 
 
 def _check_indextts_model_cached() -> bool:
-    model_dir = get_config('INDEXTTS_MODEL_DIR', 'checkpoints')
+    model_dir = get_config('INDEXTTS_MODEL_DIR', 'models/index-tts')
     if not os.path.isabs(model_dir):
         model_dir = str(PROJECT_ROOT / model_dir)
     cfg_path = os.path.join(model_dir, 'config.yaml')
@@ -141,7 +122,7 @@ def _download_indextts():
         logger.info("indextts 库未安装，开始安装...")
         _install_indextts_package()
 
-    model_dir = get_config('INDEXTTS_MODEL_DIR', 'checkpoints')
+    model_dir = get_config('INDEXTTS_MODEL_DIR', 'models/index-tts')
     if not os.path.isabs(model_dir):
         model_dir = str(PROJECT_ROOT / model_dir)
 
@@ -203,7 +184,7 @@ def _download_demucs():
             sig = line.split("-", 1)[0]
             url_map[sig] = ROOT_URL + root_url_prefix + line
 
-    checkpoints_dir = TORCH_HUB_DIR / "checkpoints"
+    checkpoints_dir = DEMUCS_MODEL_DIR / "checkpoints"
 
     for sig in signatures:
         if sig not in url_map:
@@ -254,8 +235,14 @@ ALIGN_HF_MODELS = {
 def _check_whisper_align_cached() -> bool:
     for lang, model_id in ALIGN_HF_MODELS.items():
         org, name = model_id.split("/", 1)
-        if not _check_hf_model_cached(org, name):
-            logger.debug(f"Align model for {lang} ({model_id}) not cached")
+        model_dir = Path(HF_CACHE_DIR) / f"models--{org}--{name}"
+        if not model_dir.exists():
+            return False
+        refs_dir = model_dir / "refs"
+        snapshots_dir = model_dir / "snapshots"
+        if not refs_dir.exists() or not snapshots_dir.exists():
+            return False
+        if not list(refs_dir.iterdir()):
             return False
     return True
 
@@ -284,6 +271,7 @@ def _download_align():
             _snapshot_download_with_retry(
                 model_id,
                 max_retries=2,
+                cache_dir=HF_CACHE_DIR,
                 local_files_only=False,
                 resume_download=True,
             )
@@ -295,11 +283,25 @@ def _download_align():
 
 
 def _check_pyannote_segmentation_cached() -> bool:
-    return _check_hf_model_cached("pyannote", "speaker-diarization-community-1")
+    model_dir = Path(HF_CACHE_DIR) / "models--pyannote--speaker-diarization-community-1"
+    if not model_dir.exists():
+        return False
+    refs_dir = model_dir / "refs"
+    snapshots_dir = model_dir / "snapshots"
+    if not refs_dir.exists() or not snapshots_dir.exists():
+        return False
+    return bool(list(refs_dir.iterdir()))
 
 
 def _check_pyannote_embedding_cached() -> bool:
-    return _check_hf_model_cached("pyannote", "embedding")
+    model_dir = Path(HF_CACHE_DIR) / "models--pyannote--embedding"
+    if not model_dir.exists():
+        return False
+    refs_dir = model_dir / "refs"
+    snapshots_dir = model_dir / "snapshots"
+    if not refs_dir.exists() or not snapshots_dir.exists():
+        return False
+    return bool(list(refs_dir.iterdir()))
 
 
 def _download_pyannote_segmentation():
@@ -313,6 +315,7 @@ def _download_pyannote_segmentation():
         "pyannote/speaker-diarization-community-1",
         max_retries=3,
         token=hf_token,
+        cache_dir=HF_CACHE_DIR,
         local_files_only=False,
         resume_download=True,
     )
@@ -331,6 +334,7 @@ def _download_pyannote_embedding():
         "pyannote/embedding",
         max_retries=3,
         token=hf_token,
+        cache_dir=HF_CACHE_DIR,
         local_files_only=False,
         resume_download=True,
     )

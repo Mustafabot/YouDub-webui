@@ -10,7 +10,7 @@ from whisperx.diarize import DiarizationPipeline
 from loguru import logger
 
 from .utils import save_wav
-from .config import get_config, ensure_ffmpeg_available, get_ffmpeg_path, get_hf_local_files_only, PROJECT_ROOT
+from .config import get_config, ensure_ffmpeg_available, get_ffmpeg_path, get_hf_local_files_only, PROJECT_ROOT, MODEL_ROOT
 
 
 def _log_cuda_memory(logger_func=logger.info):
@@ -64,9 +64,11 @@ align_metadata = None
 def init_whisperx():
     pass
     
-def load_whisper_model(model_name: str = 'large-v3', download_root = 'models/ASR/whisper', device='auto'):
+def load_whisper_model(model_name: str = 'large-v3', download_root = None, device='auto'):
     if model_name == 'large':
         model_name = 'large-v3'
+    if download_root is None:
+        download_root = str(MODEL_ROOT / 'whisper')
     global whisper_model
     if whisper_model is not None:
         return
@@ -105,8 +107,11 @@ def load_align_model(language='en', device='auto'):
         logger.info(f'离线模式：从本地缓存加载对齐模型: {language_code}')
     t_start = time.time()
     try:
+        _prev_hub_offline = os.environ.get('HF_HUB_OFFLINE', None)
         if local_files_only:
             os.environ['HF_HUB_OFFLINE'] = '1'
+        _prev_hf_home = os.environ.get('HF_HOME', None)
+        os.environ['HF_HOME'] = str(MODEL_ROOT / "huggingface")
         align_model, align_metadata = whisperx.load_align_model(
             language_code=language_code,
             device=device
@@ -115,8 +120,14 @@ def load_align_model(language='en', device='auto'):
         cleanup_whisperx()
         raise
     finally:
-        if 'HF_HUB_OFFLINE' in os.environ:
-            del os.environ['HF_HUB_OFFLINE']
+        if _prev_hub_offline is not None:
+            os.environ['HF_HUB_OFFLINE'] = _prev_hub_offline
+        else:
+            os.environ.pop('HF_HUB_OFFLINE', None)
+        if _prev_hf_home is not None:
+            os.environ['HF_HOME'] = _prev_hf_home
+        else:
+            os.environ.pop('HF_HOME', None)
     t_end = time.time()
     logger.info(f'Loaded alignment model: {language_code} in {t_end - t_start:.2f}s')
     _log_cuda_memory()
@@ -132,8 +143,11 @@ def load_diarize_model(device='auto'):
         logger.info('离线模式：从本地缓存加载说话者分离模型')
     t_start = time.time()
     try:
+        _prev_hub_offline = os.environ.get('HF_HUB_OFFLINE', None)
         if local_files_only:
             os.environ['HF_HUB_OFFLINE'] = '1'
+        _prev_hf_home = os.environ.get('HF_HOME', None)
+        os.environ['HF_HOME'] = str(MODEL_ROOT / "huggingface")
         diarize_model = DiarizationPipeline(
             token=get_config('HF_TOKEN'),
             device=device
@@ -142,8 +156,14 @@ def load_diarize_model(device='auto'):
         cleanup_whisperx()
         raise
     finally:
-        if 'HF_HUB_OFFLINE' in os.environ:
-            del os.environ['HF_HUB_OFFLINE']
+        if _prev_hub_offline is not None:
+            os.environ['HF_HUB_OFFLINE'] = _prev_hub_offline
+        else:
+            os.environ.pop('HF_HUB_OFFLINE', None)
+        if _prev_hf_home is not None:
+            os.environ['HF_HOME'] = _prev_hf_home
+        else:
+            os.environ.pop('HF_HOME', None)
     t_end = time.time()
     logger.info(f'Loaded diarization model in {t_end - t_start:.2f}s')
     _log_cuda_memory()
