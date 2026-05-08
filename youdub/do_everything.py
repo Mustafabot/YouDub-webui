@@ -139,7 +139,7 @@ def process_video(info, root_folder, resolution, demucs_model, device, shifts, w
             from .step020_whisperx import transcribe_all_audio_under_folder, cleanup_whisperx
             from .step030_translation import translate_all_transcript_under_folder
             from .step040_tts import generate_all_wavs_under_folder
-            from .step043_tts_f5 import cleanup_f5tts
+            from .step043_tts_indextts import cleanup_indextts
             from .step050_synthesize_video import synthesize_all_video_under_folder
             from .step060_generate_info import generate_all_info_under_folder
             from .step070_upload_bilibili import upload_all_videos_under_folder
@@ -166,7 +166,7 @@ def process_video(info, root_folder, resolution, demucs_model, device, shifts, w
             try:
                 cleanup_demucs()
                 cleanup_whisperx()
-                cleanup_f5tts()
+                cleanup_indextts()
             except Exception:
                 pass
     return False

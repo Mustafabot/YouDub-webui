@@ -9,7 +9,7 @@ import numpy as np
 from .utils import save_wav, save_wav_norm
 from .config import get_config, PROJECT_ROOT
 from .step041_tts_bytedance import tts as bytedance_tts
-from .step043_tts_f5 import tts as f5_tts, F5_AVAILABLE
+from .step043_tts_indextts import tts as indextts_tts, INDEXTTS_AVAILABLE
 from .step020_whisperx import generate_speaker_audio
 from .cn_tx import TextNorm
 from audiostretchy.stretch import stretch_audio
@@ -114,21 +114,20 @@ def generate_wavs(folder, force_bytedance=False):
     elif num_speakers == 1 and has_bytedance_config:
         use_bytedance = True
         logger.info('单说话人场景，使用火山引擎 TTS')
-    elif F5_AVAILABLE:
+    elif INDEXTTS_AVAILABLE:
         use_bytedance = False
-        logger.info('使用 F5-TTS 声音克隆')
+        logger.info('使用 IndexTTS 声音克隆')
     else:
         if has_bytedance_config:
             use_bytedance = True
-            logger.warning('F5-TTS 未安装 (pip install f5-tts)，将使用火山引擎 TTS')
+            logger.warning('IndexTTS 未安装 (pip install indextts)，将使用火山引擎 TTS')
         else:
             raise RuntimeError(
                 '所有 TTS 引擎均不可用。请至少配置一种 TTS 方式：\n'
                 '1. 配置火山引擎 TTS (BYTEDANCE_APPID + BYTEDANCE_ACCESS_TOKEN)\n'
-                '2. 安装 F5-TTS (pip install f5-tts)'
+                '2. 安装 IndexTTS (pip install indextts) 并下载模型'
             )
 
-    ref_text_map = {}
     speaker_folder = os.path.join(folder, 'SPEAKER')
     
     speakers = set()
@@ -149,15 +148,7 @@ def generate_wavs(folder, force_bytedance=False):
         logger.info(f'说话人音频文件不完整，重新生成: {speaker_folder}')
         generate_speaker_audio(folder, transcript)
     
-    if not use_bytedance:
-        for line in transcript:
-            speaker = line['speaker']
-            original_text = line.get('original', line.get('text', ''))
-            if speaker not in ref_text_map:
-                ref_text_map[speaker] = []
-            ref_text_map[speaker].append(original_text)
-        for speaker in ref_text_map:
-            ref_text_map[speaker] = ' '.join(ref_text_map[speaker][:3])
+    # IndexTTS 不使用 ref_text 参数，无需构建参考文本映射
 
     full_wav = np.zeros((0, ))
     total_segments = len(transcript)
@@ -171,7 +162,7 @@ def generate_wavs(folder, force_bytedance=False):
             voice_type = 'BV701_streaming' if num_speakers == 1 else None
             bytedance_tts(text, output_path, speaker_wav, voice_type=voice_type)
         else:
-            f5_tts(text, output_path, speaker_wav, ref_text=ref_text_map.get(speaker, ''))
+            indextts_tts(text, output_path, speaker_wav)
         if not os.path.exists(output_path):
             raise RuntimeError(f'TTS 生成失败: {output_path}，请检查 TTS 配置')
         start = line['start']

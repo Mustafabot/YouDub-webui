@@ -69,7 +69,7 @@ MODULES = {
         "dependencies": ["translation"],
         "input_files": ["translation.json", "audio_vocals.wav", "audio_instruments.wav"],
         "required_config": ["BYTEDANCE_APPID", "BYTEDANCE_ACCESS_TOKEN"],
-        "required_models": ["pyannote_embedding", "f5_tts"],
+        "required_models": ["pyannote_embedding", "indextts"],
         "requires_ffmpeg": False,
         "output_files": ["audio_combined.wav", "audio_tts.wav"],
         "function": "generate_all_wavs_under_folder",
@@ -147,11 +147,11 @@ def get_all_modules():
 
 
 def _apply_tts_overrides(module):
-    """根据 F5-TTS 可用性动态调整 TTS 模块的配置需求和网络需求"""
+    """根据 IndexTTS 可用性动态调整 TTS 模块的配置需求和网络需求"""
     module = dict(module)
     try:
-        from .step043_tts_f5 import F5_AVAILABLE
-        if F5_AVAILABLE:
+        from .step043_tts_indextts import INDEXTTS_AVAILABLE
+        if INDEXTTS_AVAILABLE:
             module["required_config"] = []
             module["online_only"] = False
         else:

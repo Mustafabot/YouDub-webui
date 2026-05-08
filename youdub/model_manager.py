@@ -10,22 +10,22 @@ from .config import get_config, PROJECT_ROOT
 from .utils import install_package_with_mirrors
 
 
-def _install_f5_package():
-    """安装 f5-tts Python 库（使用多镜像回退）"""
-    if install_package_with_mirrors("f5-tts", timeout=300):
-        logger.info("f5-tts 库安装成功")
+def _install_indextts_package():
+    """安装 indextts Python 库（使用多镜像回退）"""
+    if install_package_with_mirrors("indextts", timeout=600):
+        logger.info("indextts 库安装成功")
         return True
     raise RuntimeError(
-        "f5-tts 库安装失败。请尝试手动安装:\n"
+        "indextts 库安装失败。请尝试手动安装:\n"
         "  1. 配置 pip 镜像: pip config set global.index-url https://pypi.tuna.tsinghua.edu.cn/simple\n"
-        "  2. 手动安装: pip install f5-tts"
+        "  2. 手动安装: pip install indextts"
     )
 
 
-def _check_f5_package_installed() -> bool:
-    """检查 f5-tts 库是否已安装"""
+def _check_indextts_package_installed() -> bool:
+    """检查 indextts 库是否已安装"""
     try:
-        from f5_tts.api import F5TTS
+        from indextts.infer_v2 import IndexTTS2
         return True
     except ImportError:
         return False
@@ -126,10 +126,53 @@ def _check_demucs_model_cached() -> bool:
         return False
 
 
-def _check_f5_model_cached() -> bool:
-    base_dir = HF_CACHE_DIR / "models--SWivid--F5-TTS"
-    small_dir = HF_CACHE_DIR / "models--SWivid--F5-TTS-small"
-    return base_dir.exists() or small_dir.exists()
+def _check_indextts_model_cached() -> bool:
+    model_dir = get_config('INDEXTTS_MODEL_DIR', 'checkpoints')
+    if not os.path.isabs(model_dir):
+        model_dir = str(PROJECT_ROOT / model_dir)
+    cfg_path = os.path.join(model_dir, 'config.yaml')
+    return os.path.exists(cfg_path)
+
+
+def _download_indextts():
+    _apply_hf_endpoint()
+
+    if not _check_indextts_package_installed():
+        logger.info("indextts 库未安装，开始安装...")
+        _install_indextts_package()
+
+    model_dir = get_config('INDEXTTS_MODEL_DIR', 'checkpoints')
+    if not os.path.isabs(model_dir):
+        model_dir = str(PROJECT_ROOT / model_dir)
+
+    logger.info("Downloading IndexTTS-2 model...")
+
+    try:
+        _snapshot_download_with_retry(
+            "IndexTeam/IndexTTS-2",
+            max_retries=3,
+            local_dir=model_dir,
+            local_files_only=False,
+            resume_download=True,
+        )
+    except Exception as hf_error:
+        logger.warning(f"从 HuggingFace 下载 IndexTTS-2 失败: {hf_error}，尝试 ModelScope...")
+        try:
+            from modelscope import snapshot_download as ms_snapshot_download
+            ms_snapshot_download(
+                model_id="IndexTeam/IndexTTS-2",
+                local_dir=model_dir,
+            )
+        except Exception as ms_error:
+            raise RuntimeError(
+                f"下载 IndexTTS-2 模型失败。\n"
+                f"HuggingFace 错误: {hf_error}\n"
+                f"ModelScope 错误: {ms_error}\n"
+                f"请手动下载: huggingface-cli download IndexTeam/IndexTTS-2 --local-dir={model_dir}"
+            )
+
+    gc.collect()
+    logger.info("IndexTTS-2 model downloaded successfully")
 
 
 def _download_demucs():
@@ -295,38 +338,6 @@ def _download_pyannote_embedding():
     logger.info("pyannote/embedding model downloaded successfully")
 
 
-def _download_f5():
-    from huggingface_hub import snapshot_download
-    _apply_hf_endpoint()
-    
-    if not _check_f5_package_installed():
-        logger.info("f5-tts 库未安装，开始安装...")
-        _install_f5_package()
-    
-    logger.info("Downloading F5-TTS models...")
-    failures = []
-    for model_id in ["SWivid/F5-TTS", "SWivid/F5-TTS-small"]:
-        try:
-            _snapshot_download_with_retry(
-                model_id,
-                max_retries=2,
-                local_files_only=False,
-                resume_download=True,
-            )
-        except Exception as e:
-            logger.warning(f"下载 {model_id} 失败: {e}")
-            failures.append(model_id)
-    gc.collect()
-    if len(failures) == 2:
-        raise RuntimeError(
-            f"F5-TTS 模型下载失败，请检查网络连接或镜像配置后再试。\n"
-            f"下载失败的模型: {', '.join(failures)}"
-        )
-    if failures:
-        logger.warning(f"部分模型下载失败: {failures}，但至少有一个模型可用")
-    else:
-        logger.info("F5-TTS models downloaded successfully")
-
 
 MODEL_REGISTRY = {
     "demucs_htdemucs_ft": {
@@ -374,15 +385,15 @@ MODEL_REGISTRY = {
         "check_fn": _check_pyannote_embedding_cached,
         "download_fn": _download_pyannote_embedding,
     },
-    "f5_tts": {
-        "name": "F5-TTS",
-        "description": "零样本声音克隆模型，中文质量优秀，支持低显存自动适配（将自动安装 f5-tts 库）",
+    "indextts": {
+        "name": "IndexTTS-2",
+        "description": "工业级零样本 TTS 模型，支持声音克隆（将自动安装 indextts 库）",
         "module_id": "tts",
-        "size_gb": 1.2,
+        "size_gb": 3.5,
         "requires_hf_token": False,
-        "check_fn": _check_f5_model_cached,
-        "download_fn": _download_f5,
-        "extra_check_fn": _check_f5_package_installed,
+        "check_fn": _check_indextts_model_cached,
+        "download_fn": _download_indextts,
+        "extra_check_fn": _check_indextts_package_installed,
     },
 }
 
@@ -416,8 +427,8 @@ def check_model_status(model_id):
     if "extra_check_fn" in info:
         try:
             extra_status["extra_ok"] = info["extra_check_fn"]()
-            if model_id == "f5_tts":
-                extra_status["extra_label"] = "f5-tts库"
+            if model_id == "indextts":
+                extra_status["extra_label"] = "indextts库"
         except Exception as e:
             logger.debug(f"Error in extra check for {model_id}: {e}")
             extra_status["extra_ok"] = False

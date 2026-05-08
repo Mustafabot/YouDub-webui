@@ -221,7 +221,7 @@ def create_default_executor():
     from .step020_whisperx import transcribe_all_audio_under_folder, transcribe_audio_in_folders, init_whisperx
     from .step030_translation import translate_all_transcript_under_folder, translate_transcripts_in_folders
     from .step040_tts import generate_all_wavs_under_folder, generate_wavs_in_folders
-    from .step043_tts_f5 import init_F5TTS
+    from .step043_tts_indextts import init_indextts
     from .step050_synthesize_video import synthesize_all_video_under_folder, synthesize_video_in_folders
     from .step060_generate_info import generate_all_info_under_folder, generate_info_in_folders
     from .step070_upload_bilibili import upload_all_videos_under_folder, upload_videos_in_folders
@@ -230,7 +230,7 @@ def create_default_executor():
     executor.register_module_function("audio_separation", separate_all_audio_under_folder, init_demucs)
     executor.register_module_function("speech_recognition", transcribe_all_audio_under_folder, init_whisperx)
     executor.register_module_function("translation", translate_all_transcript_under_folder)
-    executor.register_module_function("tts", generate_all_wavs_under_folder, init_F5TTS)
+    executor.register_module_function("tts", generate_all_wavs_under_folder, init_indextts)
     executor.register_module_function("video_synthesis", synthesize_all_video_under_folder)
     executor.register_module_function("generate_info", generate_all_info_under_folder)
     executor.register_module_function("upload_bilibili", upload_all_videos_under_folder)
