@@ -113,7 +113,7 @@ def _log_cuda_memory():
         )
 
 
-def tts(text, output_path, speaker_wav, device='auto', ref_text=""):
+def tts(text, output_path, speaker_wav, device='auto'):
     global model
     if not INDEXTTS_AVAILABLE:
         raise RuntimeError("IndexTTS 未安装，请执行 pip install indextts 进行安装")
@@ -160,9 +160,10 @@ def tts(text, output_path, speaker_wav, device='auto', ref_text=""):
                 torch.cuda.empty_cache()
                 gc.collect()
     else:
+        text_display = f'{text[:50]}...' if len(text) > 50 else text
         raise RuntimeError(
             f'IndexTTS 生成失败，已重试 3 次。最后一次错误: {last_error}\n'
-            f'文本: {text[:50]}...' if len(text) > 50 else f'IndexTTS 生成失败，已重试 3 次。最后一次错误: {last_error}\n文本: {text}'
+            f'文本: {text_display}'
         )
 
 
