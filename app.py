@@ -32,11 +32,12 @@ _execution_service = ExecutionService()
 
 def save_settings(openai_api_key, openai_api_base, model_name, temperature, top_p, max_tokens, extra_body,
                   translation_system_prompt, translation_fewshot, summary_system_prompt, summary_translation_prompt,
-                  hf_token, hf_endpoint, pip_index_url, bytedance_appid, bytedance_access_token,
+                  hf_token, hf_endpoint,
+                  bytedance_appid, bytedance_access_token,
                   tts_stretch_min, tts_stretch_max,
                   indextts_model_dir, indextts_use_fp16, indextts_use_deepspeed,
                   bili_sessdata, bili_bili_jct, bili_base64,
-                  ffmpeg_path):
+                  pip_index_url, download_timeout, ffmpeg_path):
     config = {
         "OPENAI_API_KEY": openai_api_key,
         "OPENAI_API_BASE": openai_api_base,
@@ -62,6 +63,7 @@ def save_settings(openai_api_key, openai_api_base, model_name, temperature, top_
         "BILI_SESSDATA": bili_sessdata,
         "BILI_BILI_JCT": bili_bili_jct,
         "BILI_BASE64": bili_base64,
+        "DOWNLOAD_TIMEOUT": download_timeout,
         "FFMPEG_PATH": ffmpeg_path,
     }
     save_config(config)
@@ -77,14 +79,21 @@ def save_settings(openai_api_key, openai_api_base, model_name, temperature, top_
 def _format_status():
     status = get_config_status()
     lines = []
+    special_keys = {"MODELS", "FFMPEG"}
     for key, info in status.items():
-        if info["required"] and key != "MODELS":
+        if key in special_keys:
+            continue
+        if info["required"]:
             mark = "✅" if info["set"] else "❌"
             lines.append(f"{mark} {key} ({info['feature']})")
     if "MODELS" in status:
         model_info = status["MODELS"]
         mark = "✅" if model_info["set"] else "⚠️"
         lines.append(f"{mark} {model_info['message']} ({model_info['feature']})")
+    if "FFMPEG" in status:
+        ffmpeg_info = status["FFMPEG"]
+        mark = "✅" if ffmpeg_info["set"] else "❌"
+        lines.append(f"{mark} FFmpeg ({ffmpeg_info['feature']})")
     return "\n".join(lines)
 
 
@@ -308,6 +317,21 @@ def format_execution_order(selected_modules):
         return "模块选择无效"
 
 
+def select_all_modules():
+    return DEFAULT_MODULES, format_execution_order(DEFAULT_MODULES)
+
+
+def deselect_all_modules():
+    return [], format_execution_order([])
+
+
+def toggle_input_mode(mode):
+    if mode == '本地文件':
+        return gr.update(visible=False), gr.update(visible=True)
+    else:
+        return gr.update(visible=True), gr.update(visible=False)
+
+
 def import_local_videos_wrapper(local_files, folder_path, title=None, uploader=None, upload_date=None):
     if local_files is None or len(local_files) == 0:
         return _error_handler.format_error(
@@ -377,6 +401,40 @@ def upload_bilibili_wrapper(folder, folder_list_text=None, folder_select_files=N
         return _execution_service.wrap_with_logs(upload_videos_in_folders, selected_folders)
     return _execution_service.wrap_with_logs(upload_all_videos_under_folder, folder)
 
+
+def update_folder_display(folder_text, select_files):
+    folders = _file_utils.merge_folder_lists(folder_text, select_files)
+    return "\n".join(folders) if folders else "未选择任何目录"
+
+
+def create_folder_selector():
+    with gr.Accordion("选择处理目录", open=False):
+        gr.Markdown("选择要处理的已有目录。每个目录需包含相应的输入文件。")
+        folder_list_text = gr.Textbox(
+            label='目录路径列表（每行一个路径）',
+            placeholder='D:\\videos\\Uploader\\20250101 My Video',
+            lines=3
+        )
+        folder_select_files = gr.File(
+            label='从文件选择目录（选择目录中任意文件自动提取路径）',
+            file_count='multiple',
+            type='filepath'
+        )
+        folder_list_display = gr.Textbox(
+            label='已识别的目录列表',
+            value='',
+            interactive=False,
+            lines=3
+        )
+        refresh_btn = gr.Button("刷新目录列表", size="sm")
+        refresh_btn.click(
+            fn=update_folder_display,
+            inputs=[folder_list_text, folder_select_files],
+            outputs=[folder_list_display]
+        )
+    return folder_list_text, folder_select_files
+
+
 with gr.Blocks(title='YouDub') as app:
     with gr.Tabs():
         with gr.Tab('设置'):
@@ -390,10 +448,11 @@ with gr.Blocks(title='YouDub') as app:
                     "5. 在「全自动」页面输入视频链接开始处理"
                 )
             gr.Markdown("配置 YouDub 所需的各项参数，带 * 的为必填项")
-            network_display = gr.Textbox(label="网络状态", value=_format_network_status(), interactive=False, lines=6)
-            status_display = gr.Textbox(label="配置状态", value=_format_status(), interactive=False, lines=6)
+            with gr.Row():
+                network_display = gr.Textbox(label="网络状态", value=_format_network_status(), interactive=False, lines=6, scale=1)
+                status_display = gr.Textbox(label="配置状态", value=_format_status(), interactive=False, lines=6, scale=1)
             save_result = gr.Textbox(label="保存结果")
-            with gr.Accordion("翻译服务", open=True):
+            with gr.Accordion("OpenAI 翻译服务", open=True):
                 openai_api_key = gr.Textbox(label='OpenAI API Key *', type='password',
                     value=_cfg.get('OPENAI_API_KEY', ''),
                     info='用于翻译功能，获取方式：https://platform.openai.com/api-keys')
@@ -435,15 +494,13 @@ with gr.Blocks(title='YouDub') as app:
                     value=_cfg.get('SUMMARY_TRANSLATION_PROMPT', ''),
                     lines=3,
                     info='摘要翻译的 system 提示词。支持 {target_language} 占位符。留空使用默认。')
+            with gr.Accordion("HuggingFace 设置", open=True):
                 hf_token = gr.Textbox(label='HuggingFace Token *', type='password',
                     value=_cfg.get('HF_TOKEN', ''),
-                    info='用于说话者分离功能，获取方式：https://huggingface.co/settings/tokens')
+                    info='用于说话者分离和模型下载。获取方式：https://huggingface.co/settings/tokens')
                 hf_endpoint = gr.Textbox(label='HuggingFace Endpoint',
                     value=_cfg.get('HF_ENDPOINT', ''),
                     info='例如：https://hf-mirror.com，用于加速模型下载')
-                pip_index_url = gr.Textbox(label='PyPI 镜像源',
-                    value=_cfg.get('PIP_INDEX_URL', ''),
-                    info='例如：https://pypi.tuna.tsinghua.edu.cn/simple，用于加速 Python 包安装')
             with gr.Accordion("语音合成", open=True):
                 bytedance_appid = gr.Textbox(label='Bytedance App ID *',
                     value=_cfg.get('BYTEDANCE_APPID', ''),
@@ -460,7 +517,7 @@ with gr.Blocks(title='YouDub') as app:
                         info='TTS 音频拉伸的最大速度因子，值越大越快')
                 with gr.Accordion("IndexTTS 设置", open=False):
                     indextts_model_dir = gr.Textbox(label='IndexTTS 模型目录',
-                        value=_cfg.get('INDEXTTS_MODEL_DIR', 'checkpoints'),
+                        value=_cfg.get('INDEXTTS_MODEL_DIR', 'models/index-tts'),
                         info='IndexTTS-2 模型文件所在目录路径（相对于项目根目录或绝对路径）')
                     indextts_use_fp16 = gr.Checkbox(label='FP16 推理',
                         value=_cfg.get('INDEXTTS_USE_FP16', True),
@@ -478,7 +535,13 @@ with gr.Blocks(title='YouDub') as app:
                 bili_base64 = gr.Textbox(label='BiliBili Cover Base64',
                     value=_cfg.get('BILI_BASE64', ''),
                     info='B站视频封面的 Base64 编码，可选')
-            with gr.Accordion("FFmpeg 设置", open=False):
+            with gr.Accordion("包管理 & 系统设置", open=False):
+                pip_index_url = gr.Textbox(label='PyPI 镜像源',
+                    value=_cfg.get('PIP_INDEX_URL', ''),
+                    info='例如：https://pypi.tuna.tsinghua.edu.cn/simple，用于加速 Python 包安装')
+                download_timeout = gr.Slider(label='下载超时 (秒)', minimum=30, maximum=600, step=10,
+                    value=int(_cfg.get('DOWNLOAD_TIMEOUT', 120)),
+                    info='视频下载和模型下载的超时时间')
                 ffmpeg_path = gr.Textbox(label='FFmpeg 路径',
                     value=_cfg.get('FFMPEG_PATH', ''),
                     placeholder='留空则自动检测',
@@ -486,8 +549,8 @@ with gr.Blocks(title='YouDub') as app:
             with gr.Accordion("模型管理", open=True):
                 gr.Markdown(
                     "管理 YouDub 全流程所需的本地 AI 模型。首次使用前请先下载所需模型。\n\n"
-                    "需要 HF_TOKEN 的模型需先在「翻译服务」中设置 HuggingFace Token。\n\n"
-                    "如需使用镜像加速，请在「翻译服务」中设置 HuggingFace Endpoint（例如 https://hf-mirror.com），保存后再下载模型。"
+                    "需要 HF_TOKEN 的模型需先在「HuggingFace 设置」中设置 HuggingFace Token。\n\n"
+                    "如需使用镜像加速，请在「HuggingFace 设置」中设置 HuggingFace Endpoint（例如 https://hf-mirror.com），保存后再下载模型。"
                 )
                 model_status_display = gr.Textbox(label="模型状态", value=_format_model_status_ui(), interactive=False, lines=12)
                 with gr.Row():
@@ -513,12 +576,158 @@ with gr.Blocks(title='YouDub') as app:
                 fn=save_settings,
                 inputs=[openai_api_key, openai_api_base, model_name, temperature, top_p, max_tokens, extra_body,
                         translation_system_prompt, translation_fewshot, summary_system_prompt, summary_translation_prompt,
-                        hf_token, hf_endpoint, pip_index_url, bytedance_appid, bytedance_access_token,
+                        hf_token, hf_endpoint, bytedance_appid, bytedance_access_token,
                         tts_stretch_min, tts_stretch_max,
                         indextts_model_dir, indextts_use_fp16, indextts_use_deepspeed,
                         bili_sessdata, bili_bili_jct, bili_base64,
-                        ffmpeg_path],
+                        pip_index_url, download_timeout, ffmpeg_path],
                 outputs=[save_result, status_display]
+            )
+        with gr.Tab('下载视频'):
+            gr.Markdown("从视频平台下载视频，支持单个视频、播放列表和频道")
+            with gr.Tabs():
+                with gr.Tab('从 URL 下载'):
+                    gr.Markdown("输入视频、播放列表或频道链接下载视频")
+                    with gr.Column():
+                        url_input = gr.Textbox(label='Video URL', placeholder='Video or Playlist or Channel URL',
+                                              value='https://www.bilibili.com/list/1263732318')
+                        url_folder = gr.Textbox(label='Output Folder', value='videos')
+                        url_resolution = gr.Radio(RESOLUTION_CHOICES, label='Resolution', value='1080p')
+                        url_num_videos = gr.Slider(minimum=1, maximum=100, step=1, label='Number of videos to download', value=5)
+                        url_output = gr.Textbox(label='输出')
+                        url_btn = gr.Button("开始下载", variant="primary")
+                        url_btn.click(
+                            fn=lambda url, folder, resolution, num_videos: _execution_service.wrap_with_logs(download_from_url, url, folder, resolution, num_videos),
+                            inputs=[url_input, url_folder, url_resolution, url_num_videos],
+                            outputs=url_output
+                        )
+                with gr.Tab('从本地导入'):
+                    gr.Markdown("导入本地视频文件到工作目录，以便后续处理")
+                    with gr.Column():
+                        local_files = gr.File(label='本地视频文件', file_count='multiple',
+                                             type='filepath')
+                        local_folder = gr.Textbox(label='Output Folder', value='videos',
+                                                 info='视频文件将被复制到此文件夹的子目录中')
+                        with gr.Accordion("可选元数据（留空则自动生成）", open=False):
+                            local_title = gr.Textbox(label='自定义标题（仅适用于单文件）',
+                                                    placeholder='留空则使用文件名')
+                            local_uploader = gr.Textbox(label='上传者名称',
+                                                       placeholder='留空则默认为 Local')
+                            local_upload_date = gr.Textbox(label='上传日期（YYYYMMDD 格式）',
+                                                          placeholder='留空则使用文件修改日期')
+                        local_output = gr.Textbox(label='输出')
+                        local_btn = gr.Button("开始导入", variant="primary")
+                        local_btn.click(
+                            fn=import_local_videos_wrapper,
+                            inputs=[local_files, local_folder, local_title, local_uploader, local_upload_date],
+                            outputs=local_output
+                        )
+        with gr.Tab('人声分离'):
+            gr.Markdown("使用 Demucs 模型将视频中的人声和伴奏分离")
+            dm_folder = gr.Textbox(label='Folder', value='videos')
+            dm_folder_list_text, dm_folder_select_files = create_folder_selector()
+            dm_model = gr.Radio(['htdemucs', 'htdemucs_ft', 'htdemucs_6s', 'hdemucs_mmi', 'mdx', 'mdx_extra', 'mdx_q', 'mdx_extra_q', 'SIG'],
+                        label='Model', value='htdemucs_ft')
+            with gr.Accordion("高级设置", open=False):
+                dm_device = gr.Radio(['auto', 'cuda', 'cpu'], label='Device', value='auto')
+                dm_progress = gr.Checkbox(label='Progress Bar in Console', value=True)
+                dm_shifts = gr.Slider(minimum=0, maximum=10, step=1, label='Number of shifts', value=5)
+                dm_segment = gr.Slider(minimum=5, maximum=30, step=1, label='内部段长 (秒)', value=10, info='Demucs 内部分段推理长度，越小显存占用越低')
+                dm_max_chunk = gr.Slider(minimum=120, maximum=1800, step=60, label='最大分块 (秒)', value=600, info='长音频外部分块大小，越小内存占用越低，0表示不限制')
+            dm_output = gr.Textbox(label='输出')
+            dm_btn = gr.Button("开始分离", variant="primary")
+            dm_btn.click(
+                fn=demucs_wrapper,
+                inputs=[dm_folder, dm_model, dm_device, dm_progress, dm_shifts, dm_segment, dm_max_chunk, dm_folder_list_text, dm_folder_select_files],
+                outputs=dm_output
+            )
+        with gr.Tab('语音识别'):
+            gr.Markdown("使用 WhisperX 模型将语音转换为文字，支持说话者分离")
+            ws_folder = gr.Textbox(label='Folder', value='videos')
+            ws_folder_list_text, ws_folder_select_files = create_folder_selector()
+            ws_model = gr.Radio(['large', 'medium', 'small', 'base', 'tiny'], label='Model', value='large')
+            ws_diarization = gr.Checkbox(label='Diarization', value=True,
+                         info='启用说话者分离，区分不同说话人')
+            with gr.Accordion("高级设置", open=False):
+                ws_download_root = gr.Textbox(label='Download Root', value='models/ASR/whisper')
+                ws_device = gr.Radio(['auto', 'cuda', 'cpu'], label='Device', value='auto')
+                ws_batch_size = gr.Slider(minimum=1, maximum=128, step=1, label='Batch Size', value=32)
+                ws_min_speakers = gr.Radio([None, 1, 2, 3, 4, 5, 6, 7, 8, 9],
+                                   label='Min Speakers', value=None)
+                ws_max_speakers = gr.Radio([None, 1, 2, 3, 4, 5, 6, 7, 8, 9],
+                                   label='Max Speakers', value=None)
+            ws_output = gr.Textbox(label='输出')
+            ws_btn = gr.Button("开始识别", variant="primary")
+            ws_btn.click(
+                fn=whisper_wrapper,
+                inputs=[ws_folder, ws_model, ws_diarization, ws_download_root, ws_device, ws_batch_size, ws_min_speakers, ws_max_speakers, ws_folder_list_text, ws_folder_select_files],
+                outputs=ws_output
+            )
+        with gr.Tab('字幕翻译'):
+            gr.Markdown("使用大语言模型将字幕翻译为目标语言")
+            tl_folder = gr.Textbox(label='Folder', value='videos')
+            tl_folder_list_text, tl_folder_select_files = create_folder_selector()
+            tl_lang = gr.Dropdown(['简体中文', '繁体中文', 'English', 'Deutsch', 'Français', 'русский'],
+                        label='Target Language', value='简体中文')
+            tl_output = gr.Textbox(label='输出')
+            tl_btn = gr.Button("开始翻译", variant="primary")
+            tl_btn.click(
+                fn=translation_wrapper,
+                inputs=[tl_folder, tl_lang, tl_folder_list_text, tl_folder_select_files],
+                outputs=tl_output
+            )
+        with gr.Tab('语音合成'):
+            gr.Markdown("使用 TTS 模型将翻译后的文字生成语音")
+            tts_folder = gr.Textbox(label='Folder', value='videos')
+            tts_folder_list_text, tts_folder_select_files = create_folder_selector()
+            tts_force_bytedance = gr.Checkbox(label='Force Bytedance', value=False,
+                    info='强制使用火山引擎 TTS，而非 IndexTTS 声音克隆')
+            tts_output = gr.Textbox(label='输出')
+            tts_btn = gr.Button("开始合成", variant="primary")
+            tts_btn.click(
+                fn=tts_wrapper,
+                inputs=[tts_folder, tts_force_bytedance, tts_folder_list_text, tts_folder_select_files],
+                outputs=tts_output
+            )
+        with gr.Tab('视频合成'):
+            gr.Markdown("将配音、字幕与原视频合成为最终视频")
+            sv_folder = gr.Textbox(label='Folder', value='videos')
+            sv_folder_list_text, sv_folder_select_files = create_folder_selector()
+            sv_subtitles = gr.Checkbox(label='Subtitles', value=True)
+            sv_use_original_audio = gr.Checkbox(label='使用原视频音轨（不配音）', value=False,
+                info='勾选后将跳过 TTS 配音，使用原视频音轨合成')
+            sv_resolution = gr.Radio(RESOLUTION_CHOICES, label='Resolution', value='1080p')
+            with gr.Accordion("高级设置", open=False):
+                sv_speed_up = gr.Slider(minimum=0.5, maximum=2, step=0.05, label='Speed Up', value=1.05)
+                sv_fps = gr.Slider(minimum=1, maximum=60, step=1, label='FPS', value=30)
+            sv_output = gr.Textbox(label='输出')
+            sv_btn = gr.Button("开始合成", variant="primary")
+            sv_btn.click(
+                fn=synthesize_wrapper,
+                inputs=[sv_folder, sv_subtitles, sv_use_original_audio, sv_resolution, sv_speed_up, sv_fps, sv_folder_list_text, sv_folder_select_files],
+                outputs=sv_output
+            )
+        with gr.Tab('信息生成'):
+            gr.Markdown("生成视频上传所需信息")
+            gi_folder = gr.Textbox(label='Folder', value='videos')
+            gi_folder_list_text, gi_folder_select_files = create_folder_selector()
+            gi_output = gr.Textbox(label='输出')
+            gi_btn = gr.Button("开始生成", variant="primary")
+            gi_btn.click(
+                fn=generate_info_wrapper,
+                inputs=[gi_folder, gi_folder_list_text, gi_folder_select_files],
+                outputs=gi_output
+            )
+        with gr.Tab('上传B站'):
+            gr.Markdown("将合成好的视频上传到 Bilibili")
+            ub_folder = gr.Textbox(label='Folder', value='videos')
+            ub_folder_list_text, ub_folder_select_files = create_folder_selector()
+            ub_output = gr.Textbox(label='输出')
+            ub_btn = gr.Button("开始上传", variant="primary")
+            ub_btn.click(
+                fn=upload_bilibili_wrapper,
+                inputs=[ub_folder, ub_folder_list_text, ub_folder_select_files],
+                outputs=ub_output
             )
         with gr.Tab('全自动'):
             gr.Markdown("一键完成从视频下载到配音合成的全流程，支持选择性执行特定模块")
@@ -563,12 +772,6 @@ with gr.Blocks(title='YouDub') as app:
                 with gr.Row():
                     select_all_btn = gr.Button("全选", size="sm")
                     deselect_all_btn = gr.Button("全不选", size="sm")
-                
-                def select_all_modules():
-                    return DEFAULT_MODULES, format_execution_order(DEFAULT_MODULES)
-                
-                def deselect_all_modules():
-                    return [], format_execution_order([])
                 
                 select_all_btn.click(
                     fn=select_all_modules,
@@ -678,12 +881,8 @@ with gr.Blocks(title='YouDub') as app:
                     )
                     de_refresh_folders_btn = gr.Button("刷新目录列表", scale=1)
                 
-                def update_folder_list_display(folder_text, select_files):
-                    folders = _file_utils.merge_folder_lists(folder_text, select_files)
-                    return "\n".join(folders) if folders else "未选择任何目录（留空则使用URL/本地文件模式）"
-                
                 de_refresh_folders_btn.click(
-                    fn=update_folder_list_display,
+                    fn=update_folder_display,
                     inputs=[de_folder_list_text, de_folder_select_files],
                     outputs=[de_folder_list_display]
                 )
@@ -727,12 +926,6 @@ with gr.Blocks(title='YouDub') as app:
             de_output = gr.Textbox(label='输出')
             de_btn = gr.Button("开始执行", variant="primary")
             
-            def toggle_input_mode(mode):
-                if mode == '本地文件':
-                    return gr.update(visible=False), gr.update(visible=True)
-                else:
-                    return gr.update(visible=True), gr.update(visible=False)
-            
             de_input_mode.change(
                 fn=toggle_input_mode,
                 inputs=[de_input_mode],
@@ -750,313 +943,6 @@ with gr.Blocks(title='YouDub') as app:
                         de_selected_modules, de_skip_completed, de_use_module_selection, de_selected_files,
                         de_folder_list_text, de_folder_select_files],
                 outputs=de_output
-            )
-        with gr.Tab('下载视频'):
-            gr.Markdown("从视频平台下载视频，支持单个视频、播放列表和频道")
-            with gr.Tabs():
-                with gr.Tab('从 URL 下载'):
-                    gr.Markdown("输入视频、播放列表或频道链接下载视频")
-                    with gr.Column():
-                        url_input = gr.Textbox(label='Video URL', placeholder='Video or Playlist or Channel URL',
-                                              value='https://www.bilibili.com/list/1263732318')
-                        url_folder = gr.Textbox(label='Output Folder', value='videos')
-                        url_resolution = gr.Radio(RESOLUTION_CHOICES, label='Resolution', value='1080p')
-                        url_num_videos = gr.Slider(minimum=1, maximum=100, step=1, label='Number of videos to download', value=5)
-                        url_output = gr.Textbox(label='输出')
-                        url_btn = gr.Button("开始下载", variant="primary")
-                        url_btn.click(
-                            fn=lambda url, folder, resolution, num_videos: _execution_service.wrap_with_logs(download_from_url, url, folder, resolution, num_videos),
-                            inputs=[url_input, url_folder, url_resolution, url_num_videos],
-                            outputs=url_output
-                        )
-                with gr.Tab('从本地导入'):
-                    gr.Markdown("导入本地视频文件到工作目录，以便后续处理")
-                    with gr.Column():
-                        local_files = gr.File(label='本地视频文件', file_count='multiple',
-                                             type='filepath')
-                        local_folder = gr.Textbox(label='Output Folder', value='videos',
-                                                 info='视频文件将被复制到此文件夹的子目录中')
-                        with gr.Accordion("可选元数据（留空则自动生成）", open=False):
-                            local_title = gr.Textbox(label='自定义标题（仅适用于单文件）',
-                                                    placeholder='留空则使用文件名')
-                            local_uploader = gr.Textbox(label='上传者名称',
-                                                       placeholder='留空则默认为 Local')
-                            local_upload_date = gr.Textbox(label='上传日期（YYYYMMDD 格式）',
-                                                          placeholder='留空则使用文件修改日期')
-                        local_output = gr.Textbox(label='输出')
-                        local_btn = gr.Button("开始导入", variant="primary")
-                        local_btn.click(
-                            fn=import_local_videos_wrapper,
-                            inputs=[local_files, local_folder, local_title, local_uploader, local_upload_date],
-                            outputs=local_output
-                        )
-        with gr.Tab('人声分离'):
-            gr.Markdown("使用 Demucs 模型将视频中的人声和伴奏分离")
-            dm_folder = gr.Textbox(label='Folder', value='videos')
-            with gr.Accordion("选择处理目录", open=False):
-                gr.Markdown("选择要处理的已有目录。每个目录需包含 download.mp4 文件。")
-                dm_folder_list_text = gr.Textbox(
-                    label='目录路径列表（每行一个路径）',
-                    placeholder='D:\\videos\\Uploader\\20250101 My Video',
-                    lines=3
-                )
-                dm_folder_select_files = gr.File(
-                    label='从文件选择目录（选择目录中任意文件自动提取路径）',
-                    file_count='multiple',
-                    type='filepath'
-                )
-                dm_folder_list_display = gr.Textbox(
-                    label='已识别的目录列表',
-                    value='',
-                    interactive=False,
-                    lines=3
-                )
-                dm_refresh_folders_btn = gr.Button("刷新目录列表", size="sm")
-                dm_refresh_folders_btn.click(
-                    fn=lambda ft, fs: "\n".join(_file_utils.merge_folder_lists(ft, fs)) if _file_utils.merge_folder_lists(ft, fs) else "未选择任何目录",
-                    inputs=[dm_folder_list_text, dm_folder_select_files],
-                    outputs=[dm_folder_list_display]
-                )
-            dm_model = gr.Radio(['htdemucs', 'htdemucs_ft', 'htdemucs_6s', 'hdemucs_mmi', 'mdx', 'mdx_extra', 'mdx_q', 'mdx_extra_q', 'SIG'],
-                        label='Model', value='htdemucs_ft')
-            with gr.Accordion("高级设置", open=False):
-                dm_device = gr.Radio(['auto', 'cuda', 'cpu'], label='Device', value='auto')
-                dm_progress = gr.Checkbox(label='Progress Bar in Console', value=True)
-                dm_shifts = gr.Slider(minimum=0, maximum=10, step=1, label='Number of shifts', value=5)
-                dm_segment = gr.Slider(minimum=5, maximum=30, step=1, label='内部段长 (秒)', value=10, info='Demucs 内部分段推理长度，越小显存占用越低')
-                dm_max_chunk = gr.Slider(minimum=120, maximum=1800, step=60, label='最大分块 (秒)', value=600, info='长音频外部分块大小，越小内存占用越低，0表示不限制')
-            dm_output = gr.Textbox(label='输出')
-            dm_btn = gr.Button("开始分离", variant="primary")
-            dm_btn.click(
-                fn=demucs_wrapper,
-                inputs=[dm_folder, dm_model, dm_device, dm_progress, dm_shifts, dm_segment, dm_max_chunk, dm_folder_list_text, dm_folder_select_files],
-                outputs=dm_output
-            )
-        with gr.Tab('语音识别'):
-            gr.Markdown("使用 WhisperX 模型将语音转换为文字，支持说话者分离")
-            ws_folder = gr.Textbox(label='Folder', value='videos')
-            with gr.Accordion("选择处理目录", open=False):
-                gr.Markdown("选择要处理的已有目录。每个目录需包含 audio_vocals.wav 文件。")
-                ws_folder_list_text = gr.Textbox(
-                    label='目录路径列表（每行一个路径）',
-                    placeholder='D:\\videos\\Uploader\\20250101 My Video',
-                    lines=3
-                )
-                ws_folder_select_files = gr.File(
-                    label='从文件选择目录（选择目录中任意文件自动提取路径）',
-                    file_count='multiple',
-                    type='filepath'
-                )
-                ws_folder_list_display = gr.Textbox(
-                    label='已识别的目录列表',
-                    value='',
-                    interactive=False,
-                    lines=3
-                )
-                ws_refresh_folders_btn = gr.Button("刷新目录列表", size="sm")
-                ws_refresh_folders_btn.click(
-                    fn=lambda ft, fs: "\n".join(_file_utils.merge_folder_lists(ft, fs)) if _file_utils.merge_folder_lists(ft, fs) else "未选择任何目录",
-                    inputs=[ws_folder_list_text, ws_folder_select_files],
-                    outputs=[ws_folder_list_display]
-                )
-            ws_model = gr.Radio(['large', 'medium', 'small', 'base', 'tiny'], label='Model', value='large')
-            ws_diarization = gr.Checkbox(label='Diarization', value=True,
-                         info='启用说话者分离，区分不同说话人')
-            with gr.Accordion("高级设置", open=False):
-                ws_download_root = gr.Textbox(label='Download Root', value='models/ASR/whisper')
-                ws_device = gr.Radio(['auto', 'cuda', 'cpu'], label='Device', value='auto')
-                ws_batch_size = gr.Slider(minimum=1, maximum=128, step=1, label='Batch Size', value=32)
-                ws_min_speakers = gr.Radio([None, 1, 2, 3, 4, 5, 6, 7, 8, 9],
-                                   label='Min Speakers', value=None)
-                ws_max_speakers = gr.Radio([None, 1, 2, 3, 4, 5, 6, 7, 8, 9],
-                                   label='Max Speakers', value=None)
-            ws_output = gr.Textbox(label='输出')
-            ws_btn = gr.Button("开始识别", variant="primary")
-            ws_btn.click(
-                fn=whisper_wrapper,
-                inputs=[ws_folder, ws_model, ws_diarization, ws_download_root, ws_device, ws_batch_size, ws_min_speakers, ws_max_speakers, ws_folder_list_text, ws_folder_select_files],
-                outputs=ws_output
-            )
-        with gr.Tab('字幕翻译'):
-            gr.Markdown("使用大语言模型将字幕翻译为目标语言")
-            tl_folder = gr.Textbox(label='Folder', value='videos')
-            with gr.Accordion("选择处理目录", open=False):
-                gr.Markdown("选择要处理的已有目录。每个目录需包含 transcript.json 文件。")
-                tl_folder_list_text = gr.Textbox(
-                    label='目录路径列表（每行一个路径）',
-                    placeholder='D:\\videos\\Uploader\\20250101 My Video',
-                    lines=3
-                )
-                tl_folder_select_files = gr.File(
-                    label='从文件选择目录（选择目录中任意文件自动提取路径）',
-                    file_count='multiple',
-                    type='filepath'
-                )
-                tl_folder_list_display = gr.Textbox(
-                    label='已识别的目录列表',
-                    value='',
-                    interactive=False,
-                    lines=3
-                )
-                tl_refresh_folders_btn = gr.Button("刷新目录列表", size="sm")
-                tl_refresh_folders_btn.click(
-                    fn=lambda ft, fs: "\n".join(_file_utils.merge_folder_lists(ft, fs)) if _file_utils.merge_folder_lists(ft, fs) else "未选择任何目录",
-                    inputs=[tl_folder_list_text, tl_folder_select_files],
-                    outputs=[tl_folder_list_display]
-                )
-            tl_lang = gr.Dropdown(['简体中文', '繁体中文', 'English', 'Deutsch', 'Français', 'русский'],
-                        label='Target Language', value='简体中文')
-            tl_output = gr.Textbox(label='输出')
-            tl_btn = gr.Button("开始翻译", variant="primary")
-            tl_btn.click(
-                fn=translation_wrapper,
-                inputs=[tl_folder, tl_lang, tl_folder_list_text, tl_folder_select_files],
-                outputs=tl_output
-            )
-        with gr.Tab('语音合成'):
-            gr.Markdown("使用 TTS 模型将翻译后的文字生成语音")
-            tts_folder = gr.Textbox(label='Folder', value='videos')
-            with gr.Accordion("选择处理目录", open=False):
-                gr.Markdown("选择要处理的已有目录。每个目录需包含 translation.json 文件。")
-                tts_folder_list_text = gr.Textbox(
-                    label='目录路径列表（每行一个路径）',
-                    placeholder='D:\\videos\\Uploader\\20250101 My Video',
-                    lines=3
-                )
-                tts_folder_select_files = gr.File(
-                    label='从文件选择目录（选择目录中任意文件自动提取路径）',
-                    file_count='multiple',
-                    type='filepath'
-                )
-                tts_folder_list_display = gr.Textbox(
-                    label='已识别的目录列表',
-                    value='',
-                    interactive=False,
-                    lines=3
-                )
-                tts_refresh_folders_btn = gr.Button("刷新目录列表", size="sm")
-                tts_refresh_folders_btn.click(
-                    fn=lambda ft, fs: "\n".join(_file_utils.merge_folder_lists(ft, fs)) if _file_utils.merge_folder_lists(ft, fs) else "未选择任何目录",
-                    inputs=[tts_folder_list_text, tts_folder_select_files],
-                    outputs=[tts_folder_list_display]
-                )
-            tts_force_bytedance = gr.Checkbox(label='Force Bytedance', value=False,
-                    info='强制使用火山引擎 TTS，而非 IndexTTS 声音克隆')
-            tts_output = gr.Textbox(label='输出')
-            tts_btn = gr.Button("开始合成", variant="primary")
-            tts_btn.click(
-                fn=tts_wrapper,
-                inputs=[tts_folder, tts_force_bytedance, tts_folder_list_text, tts_folder_select_files],
-                outputs=tts_output
-            )
-        with gr.Tab('信息生成'):
-            gr.Markdown("生成视频上传所需信息")
-            gi_folder = gr.Textbox(label='Folder', value='videos')
-            with gr.Accordion("选择处理目录", open=False):
-                gr.Markdown("选择要处理的已有目录。每个目录需包含 download.info.json 文件。")
-                gi_folder_list_text = gr.Textbox(
-                    label='目录路径列表（每行一个路径）',
-                    placeholder='D:\\videos\\Uploader\\20250101 My Video',
-                    lines=3
-                )
-                gi_folder_select_files = gr.File(
-                    label='从文件选择目录（选择目录中任意文件自动提取路径）',
-                    file_count='multiple',
-                    type='filepath'
-                )
-                gi_folder_list_display = gr.Textbox(
-                    label='已识别的目录列表',
-                    value='',
-                    interactive=False,
-                    lines=3
-                )
-                gi_refresh_folders_btn = gr.Button("刷新目录列表", size="sm")
-                gi_refresh_folders_btn.click(
-                    fn=lambda ft, fs: "\n".join(_file_utils.merge_folder_lists(ft, fs)) if _file_utils.merge_folder_lists(ft, fs) else "未选择任何目录",
-                    inputs=[gi_folder_list_text, gi_folder_select_files],
-                    outputs=[gi_folder_list_display]
-                )
-            gi_output = gr.Textbox(label='输出')
-            gi_btn = gr.Button("开始生成", variant="primary")
-            gi_btn.click(
-                fn=generate_info_wrapper,
-                inputs=[gi_folder, gi_folder_list_text, gi_folder_select_files],
-                outputs=gi_output
-            )
-        with gr.Tab('上传B站'):
-            gr.Markdown("将合成好的视频上传到 Bilibili")
-            ub_folder = gr.Textbox(label='Folder', value='videos')
-            with gr.Accordion("选择处理目录", open=False):
-                gr.Markdown("选择要处理的已有目录。每个目录需包含 video.mp4, summary.json, video.png 文件。")
-                ub_folder_list_text = gr.Textbox(
-                    label='目录路径列表（每行一个路径）',
-                    placeholder='D:\\videos\\Uploader\\20250101 My Video',
-                    lines=3
-                )
-                ub_folder_select_files = gr.File(
-                    label='从文件选择目录（选择目录中任意文件自动提取路径）',
-                    file_count='multiple',
-                    type='filepath'
-                )
-                ub_folder_list_display = gr.Textbox(
-                    label='已识别的目录列表',
-                    value='',
-                    interactive=False,
-                    lines=3
-                )
-                ub_refresh_folders_btn = gr.Button("刷新目录列表", size="sm")
-                ub_refresh_folders_btn.click(
-                    fn=lambda ft, fs: "\n".join(_file_utils.merge_folder_lists(ft, fs)) if _file_utils.merge_folder_lists(ft, fs) else "未选择任何目录",
-                    inputs=[ub_folder_list_text, ub_folder_select_files],
-                    outputs=[ub_folder_list_display]
-                )
-            ub_output = gr.Textbox(label='输出')
-            ub_btn = gr.Button("开始上传", variant="primary")
-            ub_btn.click(
-                fn=upload_bilibili_wrapper,
-                inputs=[ub_folder, ub_folder_list_text, ub_folder_select_files],
-                outputs=ub_output
-            )
-        with gr.Tab('视频合成'):
-            gr.Markdown("将配音、字幕与原视频合成为最终视频")
-            sv_folder = gr.Textbox(label='Folder', value='videos')
-            with gr.Accordion("选择处理目录", open=False):
-                gr.Markdown("选择要处理的已有目录。每个目录需包含 download.mp4 和 translation.json 文件。")
-                sv_folder_list_text = gr.Textbox(
-                    label='目录路径列表（每行一个路径）',
-                    placeholder='D:\\videos\\Uploader\\20250101 My Video',
-                    lines=3
-                )
-                sv_folder_select_files = gr.File(
-                    label='从文件选择目录（选择目录中任意文件自动提取路径）',
-                    file_count='multiple',
-                    type='filepath'
-                )
-                sv_folder_list_display = gr.Textbox(
-                    label='已识别的目录列表',
-                    value='',
-                    interactive=False,
-                    lines=3
-                )
-                sv_refresh_folders_btn = gr.Button("刷新目录列表", size="sm")
-                sv_refresh_folders_btn.click(
-                    fn=lambda ft, fs: "\n".join(_file_utils.merge_folder_lists(ft, fs)) if _file_utils.merge_folder_lists(ft, fs) else "未选择任何目录",
-                    inputs=[sv_folder_list_text, sv_folder_select_files],
-                    outputs=[sv_folder_list_display]
-                )
-            sv_subtitles = gr.Checkbox(label='Subtitles', value=True)
-            sv_use_original_audio = gr.Checkbox(label='使用原视频音轨（不配音）', value=False,
-                info='勾选后将跳过 TTS 配音，使用原视频音轨合成')
-            sv_resolution = gr.Radio(RESOLUTION_CHOICES, label='Resolution', value='1080p')
-            with gr.Accordion("高级设置", open=False):
-                sv_speed_up = gr.Slider(minimum=0.5, maximum=2, step=0.05, label='Speed Up', value=1.05)
-                sv_fps = gr.Slider(minimum=1, maximum=60, step=1, label='FPS', value=30)
-            sv_output = gr.Textbox(label='输出')
-            sv_btn = gr.Button("开始合成", variant="primary")
-            sv_btn.click(
-                fn=synthesize_wrapper,
-                inputs=[sv_folder, sv_subtitles, sv_use_original_audio, sv_resolution, sv_speed_up, sv_fps, sv_folder_list_text, sv_folder_select_files],
-                outputs=sv_output
             )
 
 def _check_dependency_compatibility():
