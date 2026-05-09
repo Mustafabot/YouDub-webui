@@ -250,26 +250,27 @@ def do_everything_wrapper(input_mode, url, local_files, root_folder, num_videos,
         return error_result
 
 
-def demucs_wrapper(folder, model, device, progress, shifts, segment, max_chunk_seconds, folder_list_text=None, folder_select_files=None):
+def demucs_wrapper(files, model, device, progress, shifts, segment, max_chunk_seconds):
     from youdub.step010_demucs_vr import separate_audio_in_folders
-    return _execution_service.execute_with_folders_support(
-        folder, folder_list_text, folder_select_files,
-        batch_function=separate_audio_in_folders,
-        single_function=separate_all_audio_under_folder,
+    return _execution_service.execute_batch_with_files(
         module_name="人声分离",
+        batch_function=separate_audio_in_folders,
+        file_paths=files,
+        target_filename="download.mp4",
         cleanup_function=cleanup_demucs,
-        model_name=model, device=device, progress=progress, shifts=int(shifts),
-        segment=int(segment), max_chunk_seconds=int(max_chunk_seconds)
+        model_name=model, device=device, progress=progress,
+        shifts=int(shifts), segment=int(segment),
+        max_chunk_seconds=int(max_chunk_seconds)
     )
 
 
-def whisper_wrapper(folder, model, diarization, download_root, device, batch_size, min_speakers, max_speakers, folder_list_text=None, folder_select_files=None):
+def whisper_wrapper(files, model, diarization, download_root, device, batch_size, min_speakers, max_speakers):
     from youdub.step020_whisperx import transcribe_audio_in_folders
-    return _execution_service.execute_with_folders_support(
-        folder, folder_list_text, folder_select_files,
-        batch_function=transcribe_audio_in_folders,
-        single_function=transcribe_all_audio_under_folder,
+    return _execution_service.execute_batch_with_files(
         module_name="语音识别",
+        batch_function=transcribe_audio_in_folders,
+        file_paths=files,
+        target_filename="audio_vocals.wav",
         cleanup_function=cleanup_whisperx,
         model_name=model, download_root=download_root, device=device,
         batch_size=int(batch_size), diarization=diarization,
@@ -277,14 +278,17 @@ def whisper_wrapper(folder, model, diarization, download_root, device, batch_siz
     )
 
 
-def synthesize_wrapper(folder, subtitles, use_original_audio, resolution, speed_up, fps, folder_list_text=None, folder_select_files=None):
-    from youdub.step050_synthesize_video import synthesize_video_in_folders
-    return _execution_service.execute_with_folders_support(
-        folder, folder_list_text, folder_select_files,
-        batch_function=synthesize_video_in_folders,
-        single_function=synthesize_all_video_under_folder,
+def synthesize_wrapper(video_file, translation_file, audio_combined_file, subtitles, use_original_audio, resolution, speed_up, fps):
+    return _execution_service.execute_single_with_files(
         module_name="视频合成",
-        subtitles=subtitles, use_original_audio=use_original_audio, speed_up=float(speed_up), fps=int(fps), resolution=resolution
+        single_function=synthesize_all_video_under_folder,
+        file_map={
+            "download.mp4": video_file,
+            "translation.json": translation_file,
+            "audio_combined.wav": audio_combined_file,
+        },
+        subtitles=subtitles, use_original_audio=use_original_audio,
+        speed_up=float(speed_up), fps=int(fps), resolution=resolution
     )
 
 
@@ -370,69 +374,59 @@ def import_local_videos_wrapper(local_files, folder_path, title=None, uploader=N
     return output
 
 
-def translation_wrapper(folder, lang, folder_list_text=None, folder_select_files=None):
-    selected_folders = _file_utils.merge_folder_lists(folder_list_text, folder_select_files)
-    if selected_folders:
-        from youdub.step030_translation import translate_transcripts_in_folders
-        return _execution_service.wrap_with_logs(translate_transcripts_in_folders, selected_folders, lang)
-    return _execution_service.wrap_with_logs(translate_all_transcript_under_folder, folder, lang)
+def translation_wrapper(transcript_file, info_file, lang):
+    return _execution_service.execute_single_with_files(
+        module_name="字幕翻译",
+        single_function=translate_all_transcript_under_folder,
+        file_map={
+            "transcript.json": transcript_file,
+            "download.info.json": info_file,
+        },
+        target_language=lang
+    )
 
 
-def tts_wrapper(folder, force_bytedance, folder_list_text=None, folder_select_files=None):
-    selected_folders = _file_utils.merge_folder_lists(folder_list_text, folder_select_files)
-    if selected_folders:
-        from youdub.step040_tts import generate_wavs_in_folders
-        return _execution_service.wrap_with_logs(generate_wavs_in_folders, selected_folders, force_bytedance)
-    return _execution_service.wrap_with_logs(generate_all_wavs_under_folder, folder, force_bytedance)
+def tts_wrapper(translation_file, vocals_file, instruments_file, force_bytedance):
+    return _execution_service.execute_single_with_files(
+        module_name="语音合成",
+        single_function=generate_all_wavs_under_folder,
+        file_map={
+            "translation.json": translation_file,
+            "audio_vocals.wav": vocals_file,
+            "audio_instruments.wav": instruments_file,
+        },
+        force_bytedance=force_bytedance
+    )
 
 
-def generate_info_wrapper(folder, folder_list_text=None, folder_select_files=None):
-    selected_folders = _file_utils.merge_folder_lists(folder_list_text, folder_select_files)
-    if selected_folders:
-        from youdub.step060_generate_info import generate_info_in_folders
-        return _execution_service.wrap_with_logs(generate_info_in_folders, selected_folders)
-    return _execution_service.wrap_with_logs(generate_all_info_under_folder, folder)
+def generate_info_wrapper(summary_file, info_file, thumbnail_file):
+    return _execution_service.execute_single_with_files(
+        module_name="信息生成",
+        single_function=generate_all_info_under_folder,
+        file_map={
+            "summary.json": summary_file,
+            "download.info.json": info_file,
+            "download.jpg": thumbnail_file,
+        }
+    )
 
 
-def upload_bilibili_wrapper(folder, folder_list_text=None, folder_select_files=None):
-    selected_folders = _file_utils.merge_folder_lists(folder_list_text, folder_select_files)
-    if selected_folders:
-        from youdub.step070_upload_bilibili import upload_videos_in_folders
-        return _execution_service.wrap_with_logs(upload_videos_in_folders, selected_folders)
-    return _execution_service.wrap_with_logs(upload_all_videos_under_folder, folder)
+def upload_bilibili_wrapper(video_file, summary_file, cover_file, info_file):
+    return _execution_service.execute_single_with_files(
+        module_name="B站上传",
+        single_function=upload_all_videos_under_folder,
+        file_map={
+            "video.mp4": video_file,
+            "summary.json": summary_file,
+            "video.png": cover_file,
+            "download.info.json": info_file,
+        }
+    )
 
 
 def update_folder_display(folder_text, select_files):
     folders = _file_utils.merge_folder_lists(folder_text, select_files)
     return "\n".join(folders) if folders else "未选择任何目录"
-
-
-def create_folder_selector():
-    with gr.Accordion("选择处理目录", open=False):
-        gr.Markdown("选择要处理的已有目录。每个目录需包含相应的输入文件。")
-        folder_list_text = gr.Textbox(
-            label='目录路径列表（每行一个路径）',
-            placeholder='D:\\videos\\Uploader\\20250101 My Video',
-            lines=3
-        )
-        folder_select_files = gr.File(
-            label='从文件选择目录（选择目录中任意文件自动提取路径）',
-            file_count='multiple',
-            type='filepath'
-        )
-        folder_list_display = gr.Textbox(
-            label='已识别的目录列表',
-            value='',
-            interactive=False,
-            lines=3
-        )
-        refresh_btn = gr.Button("刷新目录列表", size="sm")
-        refresh_btn.click(
-            fn=update_folder_display,
-            inputs=[folder_list_text, folder_select_files],
-            outputs=[folder_list_display]
-        )
-    return folder_list_text, folder_select_files
 
 
 with gr.Blocks(title='YouDub') as app:
@@ -623,9 +617,9 @@ with gr.Blocks(title='YouDub') as app:
                             outputs=local_output
                         )
         with gr.Tab('人声分离'):
-            gr.Markdown("使用 Demucs 模型将视频中的人声和伴奏分离")
-            dm_folder = gr.Textbox(label='Folder', value='videos')
-            dm_folder_list_text, dm_folder_select_files = create_folder_selector()
+            gr.Markdown("使用 Demucs 模型将视频中的人声和伴奏分离。选择视频文件，系统将自动创建临时目录并处理。")
+            dm_files = gr.File(label='选择视频文件', file_count='multiple', type='filepath',
+                               file_types=['.mp4', '.avi', '.mkv', '.mov', '.flv'])
             dm_model = gr.Radio(['htdemucs', 'htdemucs_ft', 'htdemucs_6s', 'hdemucs_mmi', 'mdx', 'mdx_extra', 'mdx_q', 'mdx_extra_q', 'SIG'],
                         label='Model', value='htdemucs_ft')
             with gr.Accordion("高级设置", open=False):
@@ -634,17 +628,19 @@ with gr.Blocks(title='YouDub') as app:
                 dm_shifts = gr.Slider(minimum=0, maximum=10, step=1, label='Number of shifts', value=5)
                 dm_segment = gr.Slider(minimum=5, maximum=30, step=1, label='内部段长 (秒)', value=10, info='Demucs 内部分段推理长度，越小显存占用越低')
                 dm_max_chunk = gr.Slider(minimum=120, maximum=1800, step=60, label='最大分块 (秒)', value=600, info='长音频外部分块大小，越小内存占用越低，0表示不限制')
-            dm_output = gr.Textbox(label='输出')
+            with gr.Row():
+                dm_output = gr.Textbox(label='输出', scale=3)
+                dm_output_files = gr.File(label='生成文件', scale=2)
             dm_btn = gr.Button("开始分离", variant="primary")
             dm_btn.click(
                 fn=demucs_wrapper,
-                inputs=[dm_folder, dm_model, dm_device, dm_progress, dm_shifts, dm_segment, dm_max_chunk, dm_folder_list_text, dm_folder_select_files],
-                outputs=dm_output
+                inputs=[dm_files, dm_model, dm_device, dm_progress, dm_shifts, dm_segment, dm_max_chunk],
+                outputs=[dm_output, dm_output_files]
             )
         with gr.Tab('语音识别'):
-            gr.Markdown("使用 WhisperX 模型将语音转换为文字，支持说话者分离")
-            ws_folder = gr.Textbox(label='Folder', value='videos')
-            ws_folder_list_text, ws_folder_select_files = create_folder_selector()
+            gr.Markdown("使用 WhisperX 模型将语音转换为文字，支持说话者分离。选择人声音频文件，系统将自动创建临时目录并处理。")
+            ws_files = gr.File(label='选择人声音频文件', file_count='multiple', type='filepath',
+                               file_types=['.wav', '.mp3', '.flac', '.m4a', '.aac'])
             ws_model = gr.Radio(['large', 'medium', 'small', 'base', 'tiny'], label='Model', value='large')
             ws_diarization = gr.Checkbox(label='Diarization', value=True,
                          info='启用说话者分离，区分不同说话人')
@@ -656,78 +652,110 @@ with gr.Blocks(title='YouDub') as app:
                                    label='Min Speakers', value=None)
                 ws_max_speakers = gr.Radio([None, 1, 2, 3, 4, 5, 6, 7, 8, 9],
                                    label='Max Speakers', value=None)
-            ws_output = gr.Textbox(label='输出')
+            with gr.Row():
+                ws_output = gr.Textbox(label='输出', scale=3)
+                ws_output_files = gr.File(label='生成文件', scale=2)
             ws_btn = gr.Button("开始识别", variant="primary")
             ws_btn.click(
                 fn=whisper_wrapper,
-                inputs=[ws_folder, ws_model, ws_diarization, ws_download_root, ws_device, ws_batch_size, ws_min_speakers, ws_max_speakers, ws_folder_list_text, ws_folder_select_files],
-                outputs=ws_output
+                inputs=[ws_files, ws_model, ws_diarization, ws_download_root, ws_device, ws_batch_size, ws_min_speakers, ws_max_speakers],
+                outputs=[ws_output, ws_output_files]
             )
         with gr.Tab('字幕翻译'):
-            gr.Markdown("使用大语言模型将字幕翻译为目标语言")
-            tl_folder = gr.Textbox(label='Folder', value='videos')
-            tl_folder_list_text, tl_folder_select_files = create_folder_selector()
+            gr.Markdown("使用大语言模型将字幕翻译为目标语言。选择识别结果和视频信息文件，系统将自动创建临时目录并处理。")
+            tl_transcript_file = gr.File(label='识别结果文件 (transcript.json)', file_count='single', type='filepath',
+                                         file_types=['.json'])
+            tl_info_file = gr.File(label='视频信息文件 (download.info.json)', file_count='single', type='filepath',
+                                   file_types=['.json'])
             tl_lang = gr.Dropdown(['简体中文', '繁体中文', 'English', 'Deutsch', 'Français', 'русский'],
                         label='Target Language', value='简体中文')
-            tl_output = gr.Textbox(label='输出')
+            with gr.Row():
+                tl_output = gr.Textbox(label='输出', scale=3)
+                tl_output_files = gr.File(label='生成文件', scale=2)
             tl_btn = gr.Button("开始翻译", variant="primary")
             tl_btn.click(
                 fn=translation_wrapper,
-                inputs=[tl_folder, tl_lang, tl_folder_list_text, tl_folder_select_files],
-                outputs=tl_output
+                inputs=[tl_transcript_file, tl_info_file, tl_lang],
+                outputs=[tl_output, tl_output_files]
             )
         with gr.Tab('语音合成'):
-            gr.Markdown("使用 TTS 模型将翻译后的文字生成语音")
-            tts_folder = gr.Textbox(label='Folder', value='videos')
-            tts_folder_list_text, tts_folder_select_files = create_folder_selector()
+            gr.Markdown("使用 TTS 模型将翻译后的文字生成语音。选择翻译结果和音频文件，系统将自动创建临时目录并处理。")
+            tts_translation_file = gr.File(label='翻译结果文件 (translation.json)', file_count='single', type='filepath',
+                                           file_types=['.json'])
+            tts_vocals_file = gr.File(label='人声音频文件 (audio_vocals.wav)', file_count='single', type='filepath',
+                                      file_types=['.wav', '.mp3', '.flac', '.m4a', '.aac'])
+            tts_instruments_file = gr.File(label='伴奏音频文件 (audio_instruments.wav)', file_count='single', type='filepath',
+                                           file_types=['.wav', '.mp3', '.flac', '.m4a', '.aac'])
             tts_force_bytedance = gr.Checkbox(label='Force Bytedance', value=False,
                     info='强制使用火山引擎 TTS，而非 IndexTTS 声音克隆')
-            tts_output = gr.Textbox(label='输出')
+            with gr.Row():
+                tts_output = gr.Textbox(label='输出', scale=3)
+                tts_output_files = gr.File(label='生成文件', scale=2)
             tts_btn = gr.Button("开始合成", variant="primary")
             tts_btn.click(
                 fn=tts_wrapper,
-                inputs=[tts_folder, tts_force_bytedance, tts_folder_list_text, tts_folder_select_files],
-                outputs=tts_output
+                inputs=[tts_translation_file, tts_vocals_file, tts_instruments_file, tts_force_bytedance],
+                outputs=[tts_output, tts_output_files]
             )
         with gr.Tab('视频合成'):
-            gr.Markdown("将配音、字幕与原视频合成为最终视频")
-            sv_folder = gr.Textbox(label='Folder', value='videos')
-            sv_folder_list_text, sv_folder_select_files = create_folder_selector()
+            gr.Markdown("将配音、字幕与原视频合成为最终视频。选择视频、翻译结果和合成音频文件，系统将自动创建临时目录并处理。")
+            sv_video_file = gr.File(label='视频文件 (download.mp4)', file_count='single', type='filepath',
+                                    file_types=['.mp4', '.avi', '.mkv', '.mov', '.flv'])
+            sv_translation_file = gr.File(label='翻译结果文件 (translation.json)', file_count='single', type='filepath',
+                                          file_types=['.json'])
+            sv_audio_combined_file = gr.File(label='合成音频文件 (audio_combined.wav)', file_count='single', type='filepath',
+                                             file_types=['.wav', '.mp3', '.flac', '.m4a', '.aac'])
             sv_subtitles = gr.Checkbox(label='Subtitles', value=True)
             sv_use_original_audio = gr.Checkbox(label='使用原视频音轨（不配音）', value=False,
-                info='勾选后将跳过 TTS 配音，使用原视频音轨合成')
+                info='勾选后将跳过 TTS 配音，使用原视频音轨合成。此时无需选择合成音频文件。')
             sv_resolution = gr.Radio(RESOLUTION_CHOICES, label='Resolution', value='1080p')
             with gr.Accordion("高级设置", open=False):
                 sv_speed_up = gr.Slider(minimum=0.5, maximum=2, step=0.05, label='Speed Up', value=1.05)
                 sv_fps = gr.Slider(minimum=1, maximum=60, step=1, label='FPS', value=30)
-            sv_output = gr.Textbox(label='输出')
+            with gr.Row():
+                sv_output = gr.Textbox(label='输出', scale=3)
+                sv_output_files = gr.File(label='生成文件', scale=2)
             sv_btn = gr.Button("开始合成", variant="primary")
             sv_btn.click(
                 fn=synthesize_wrapper,
-                inputs=[sv_folder, sv_subtitles, sv_use_original_audio, sv_resolution, sv_speed_up, sv_fps, sv_folder_list_text, sv_folder_select_files],
-                outputs=sv_output
+                inputs=[sv_video_file, sv_translation_file, sv_audio_combined_file, sv_subtitles, sv_use_original_audio, sv_resolution, sv_speed_up, sv_fps],
+                outputs=[sv_output, sv_output_files]
             )
         with gr.Tab('信息生成'):
-            gr.Markdown("生成视频上传所需信息")
-            gi_folder = gr.Textbox(label='Folder', value='videos')
-            gi_folder_list_text, gi_folder_select_files = create_folder_selector()
-            gi_output = gr.Textbox(label='输出')
+            gr.Markdown("生成视频上传所需信息。选择摘要、视频信息和缩略图文件，系统将自动创建临时目录并处理。")
+            gi_summary_file = gr.File(label='摘要文件 (summary.json)', file_count='single', type='filepath',
+                                      file_types=['.json'])
+            gi_info_file = gr.File(label='视频信息文件 (download.info.json)', file_count='single', type='filepath',
+                                   file_types=['.json'])
+            gi_thumbnail_file = gr.File(label='缩略图文件 (download.jpg/png)', file_count='single', type='filepath',
+                                        file_types=['.jpg', '.jpeg', '.png', '.bmp', '.webp'])
+            with gr.Row():
+                gi_output = gr.Textbox(label='输出', scale=3)
+                gi_output_files = gr.File(label='生成文件', scale=2)
             gi_btn = gr.Button("开始生成", variant="primary")
             gi_btn.click(
                 fn=generate_info_wrapper,
-                inputs=[gi_folder, gi_folder_list_text, gi_folder_select_files],
-                outputs=gi_output
+                inputs=[gi_summary_file, gi_info_file, gi_thumbnail_file],
+                outputs=[gi_output, gi_output_files]
             )
         with gr.Tab('上传B站'):
-            gr.Markdown("将合成好的视频上传到 Bilibili")
-            ub_folder = gr.Textbox(label='Folder', value='videos')
-            ub_folder_list_text, ub_folder_select_files = create_folder_selector()
-            ub_output = gr.Textbox(label='输出')
+            gr.Markdown("将合成好的视频上传到 Bilibili。选择视频、摘要、封面和信息文件，系统将自动创建临时目录并处理。")
+            ub_video_file = gr.File(label='合成视频文件 (video.mp4)', file_count='single', type='filepath',
+                                    file_types=['.mp4', '.avi', '.mkv', '.mov'])
+            ub_summary_file = gr.File(label='摘要文件 (summary.json)', file_count='single', type='filepath',
+                                      file_types=['.json'])
+            ub_cover_file = gr.File(label='封面文件 (video.png)', file_count='single', type='filepath',
+                                    file_types=['.png', '.jpg', '.jpeg'])
+            ub_info_file = gr.File(label='视频信息文件 (download.info.json)', file_count='single', type='filepath',
+                                   file_types=['.json'])
+            with gr.Row():
+                ub_output = gr.Textbox(label='输出', scale=3)
+                ub_output_files = gr.File(label='生成文件', scale=2)
             ub_btn = gr.Button("开始上传", variant="primary")
             ub_btn.click(
                 fn=upload_bilibili_wrapper,
-                inputs=[ub_folder, ub_folder_list_text, ub_folder_select_files],
-                outputs=ub_output
+                inputs=[ub_video_file, ub_summary_file, ub_cover_file, ub_info_file],
+                outputs=[ub_output, ub_output_files]
             )
         with gr.Tab('全自动'):
             gr.Markdown("一键完成从视频下载到配音合成的全流程，支持选择性执行特定模块")

@@ -1,5 +1,6 @@
 import os
 import shutil
+import uuid
 from typing import Dict, List, Optional, Tuple
 from loguru import logger
 from ..config import PROJECT_ROOT
@@ -53,7 +54,11 @@ INPUT_FILE_FORMATS = {
     "video.png": {
         "extensions": [".png", ".jpg", ".jpeg"],
         "description": "视频封面文件"
-    }
+    },
+    "download.jpg": {
+        "extensions": [".jpg", ".jpeg", ".png", ".bmp", ".webp"],
+        "description": "缩略图文件"
+    },
 }
 
 
@@ -125,6 +130,52 @@ class FileUtils:
             lines.append(f"  {FileUtils.get_file_label(filename)}: {status}")
 
         return "\n".join(lines)
+
+    @staticmethod
+    def create_temp_working_dir(prefix: str) -> str:
+        temp_root = os.path.join(str(PROJECT_ROOT), ".temp")
+        os.makedirs(temp_root, exist_ok=True)
+        dir_name = f"{prefix}_{uuid.uuid4().hex[:8]}"
+        temp_dir = os.path.join(temp_root, dir_name)
+        os.makedirs(temp_dir, exist_ok=True)
+        logger.info(f"创建临时工作目录: {temp_dir}")
+        return temp_dir
+
+    @staticmethod
+    def prepare_single_input_dirs(file_paths: list, target_filename: str) -> List[str]:
+        dirs = []
+        for file_path in file_paths:
+            fpath = file_path.name if hasattr(file_path, 'name') else file_path
+            if not fpath or not os.path.exists(fpath):
+                logger.warning(f"文件不存在，跳过: {fpath}")
+                continue
+            base = os.path.splitext(os.path.basename(fpath))[0]
+            working_dir = FileUtils.create_temp_working_dir(base)
+            shutil.copy2(fpath, os.path.join(working_dir, target_filename))
+            dirs.append(working_dir)
+        return dirs
+
+    @staticmethod
+    def prepare_multi_input_dir(file_map: Dict[str, str]) -> str:
+        working_dir = FileUtils.create_temp_working_dir("multi")
+        for target_filename, file_path in file_map.items():
+            fpath = file_path.name if hasattr(file_path, 'name') else file_path
+            if not fpath or not os.path.exists(fpath):
+                logger.warning(f"文件不存在，跳过: {target_filename} <- {fpath}")
+                continue
+            shutil.copy2(fpath, os.path.join(working_dir, target_filename))
+        return working_dir
+
+    @staticmethod
+    def collect_output_files(working_dir: str) -> List[str]:
+        if not os.path.exists(working_dir):
+            return []
+        files = []
+        for f in os.listdir(working_dir):
+            fpath = os.path.join(working_dir, f)
+            if os.path.isfile(fpath):
+                files.append(fpath)
+        return sorted(files)
 
     @staticmethod
     def resolve_folder_path(folder: str) -> str:

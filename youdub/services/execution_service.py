@@ -1,5 +1,5 @@
 import os
-from typing import Callable, List, Optional
+from typing import Callable, List, Optional, Tuple
 from loguru import logger
 from ..log_config import get_log_buffer, clear_log_buffer
 from .error_handler import ErrorHandler
@@ -97,6 +97,94 @@ class ExecutionService:
         return self.execute_with_wrapper(
             folder, single_function, module_name, cleanup_function, **kwargs
         )
+
+    def execute_batch_with_files(
+        self,
+        module_name: str,
+        batch_function: Callable,
+        file_paths: list,
+        target_filename: str,
+        cleanup_function: Optional[Callable] = None,
+        **kwargs
+    ) -> Tuple[str, List[str]]:
+        if not file_paths:
+            return self.error_handler.format_error(
+                f"未选择文件",
+                [f"{module_name}需要选择输入文件"],
+                ["请选择对应的输入文件"]
+            ), []
+
+        working_dirs = self.file_utils.prepare_single_input_dirs(file_paths, target_filename)
+        if not working_dirs:
+            return self.error_handler.format_error(
+                "文件准备失败",
+                ["无法为选中的文件创建工作目录"],
+                ["请检查文件是否存在且可读"]
+            ), []
+
+        clear_log_buffer()
+        try:
+            result = batch_function(working_dirs, **kwargs)
+            output_files = []
+            for d in working_dirs:
+                output_files.extend(self.file_utils.collect_output_files(d))
+            output = f"✅ {result}" if result and not str(result).startswith("❌") else result
+            logs = get_log_buffer()
+            if logs:
+                output = f"{logs}\n\n{output}"
+            return output, output_files
+        except Exception as e:
+            logger.error(f"{module_name}失败: {e}")
+            if cleanup_function:
+                try:
+                    cleanup_function()
+                except Exception as cleanup_error:
+                    logger.warning(f"清理失败: {cleanup_error}")
+            logs = get_log_buffer()
+            error_result = self.error_handler.classify_error(e)
+            if logs:
+                return f"{logs}\n\n{error_result}", []
+            return error_result, []
+
+    def execute_single_with_files(
+        self,
+        module_name: str,
+        single_function: Callable,
+        file_map: dict,
+        cleanup_function: Optional[Callable] = None,
+        **kwargs
+    ) -> Tuple[str, List[str]]:
+        required_keys = [k for k, v in file_map.items() if v is None]
+        if required_keys:
+            return self.error_handler.format_error(
+                "未选择必要的输入文件",
+                [f"缺少以下输入文件: {', '.join(required_keys)}"],
+                ["请选择所有必要的输入文件"]
+            ), []
+
+        working_dir = self.file_utils.prepare_multi_input_dir(file_map)
+
+        clear_log_buffer()
+        try:
+            result = single_function(working_dir, **kwargs)
+            output_files = self.file_utils.collect_output_files(working_dir)
+            output = f"✅ {result}" if result and not str(result).startswith("❌") else result
+            logs = get_log_buffer()
+            if logs:
+                output = f"{logs}\n\n{output}"
+            return output, output_files
+        except Exception as e:
+            logger.error(f"{module_name}失败: {e}")
+            if cleanup_function:
+                try:
+                    cleanup_function()
+                except Exception as cleanup_error:
+                    logger.warning(f"清理失败: {cleanup_error}")
+            logs = get_log_buffer()
+            error_result = self.error_handler.classify_error(e)
+            if logs:
+                return f"{logs}\n\n{error_result}", []
+            return error_result, []
 
     def wrap_with_logs(self, func: Callable, *args, **kwargs) -> str:
         clear_log_buffer()
