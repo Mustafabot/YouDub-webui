@@ -114,6 +114,7 @@ class ExecutionService:
         batch_function: Callable,
         file_paths: list,
         target_filename: str,
+        output_dir: Optional[str] = None,
         cleanup_function: Optional[Callable] = None,
         **kwargs
     ) -> Tuple[str, List[str]]:
@@ -124,7 +125,7 @@ class ExecutionService:
                 ["请选择对应的输入文件"]
             ), []
 
-        working_dir_pairs = self.file_utils.prepare_single_input_dirs(file_paths, target_filename)
+        working_dir_pairs = self.file_utils.prepare_single_input_dirs(file_paths, target_filename, output_dir)
         if not working_dir_pairs:
             return self.error_handler.format_error(
                 "文件准备失败",
@@ -139,11 +140,11 @@ class ExecutionService:
             result = batch_function(working_dirs, **kwargs)
             output_files = []
             for (working_dir, source_dir) in working_dir_pairs:
-                # 将处理产生的输出文件回拷到原始源目录
-                self.file_utils.copy_output_files_back(
+                # 将处理产生的输出文件回拷到原始源目录，并收集源目录中的路径
+                copied = self.file_utils.copy_output_files_back(
                     working_dir, source_dir, input_filenames=[target_filename]
                 )
-                output_files.extend(self.file_utils.collect_output_files(working_dir))
+                output_files.extend(copied)
             output = self._format_output(result)
             logs = get_log_buffer()
             if logs:
@@ -173,6 +174,7 @@ class ExecutionService:
         module_name: str,
         single_function: Callable,
         file_map: dict,
+        output_dir: Optional[str] = None,
         cleanup_function: Optional[Callable] = None,
         **kwargs
     ) -> Tuple[str, List[str]]:
@@ -184,32 +186,39 @@ class ExecutionService:
                 ["请选择所有必要的输入文件"]
             ), []
 
-        # 确定原始源目录：取所有输入文件的公共父目录
-        source_paths = []
-        for filepath in file_map.values():
-            if filepath:
-                fpath = filepath.name if hasattr(filepath, 'name') else filepath
-                if fpath and os.path.exists(fpath):
-                    source_paths.append(os.path.dirname(os.path.abspath(fpath)))
-        source_dir = None
-        if source_paths:
-            try:
-                source_dir = os.path.commonpath(source_paths)
-            except ValueError:
-                logger.warning("输入文件跨盘符，输出将回拷到第一个文件所在目录")
-                source_dir = source_paths[0]
+        # 用户指定输出目录优先
+        if output_dir and output_dir.strip():
+            source_dir = self.file_utils.resolve_folder_path(output_dir)
+            os.makedirs(source_dir, exist_ok=True)
+            logger.info(f"使用用户指定的输出目录: {source_dir}")
+        else:
+            # 确定原始源目录：取所有输入文件的公共父目录
+            source_paths = []
+            for filepath in file_map.values():
+                if filepath:
+                    fpath = filepath.name if hasattr(filepath, 'name') else filepath
+                    if fpath and os.path.exists(fpath):
+                        source_paths.append(os.path.dirname(os.path.abspath(fpath)))
+            source_dir = None
+            if source_paths:
+                try:
+                    source_dir = os.path.commonpath(source_paths)
+                except ValueError:
+                    logger.warning("输入文件跨盘符，输出将回拷到第一个文件所在目录")
+                    source_dir = source_paths[0]
 
         working_dir = self.file_utils.prepare_multi_input_dir(file_map)
 
         clear_log_buffer()
         try:
             result = single_function(working_dir, **kwargs)
-            # 将处理产生的输出文件回拷到原始源目录
+            # 将处理产生的输出文件回拷到原始源目录，并收集源目录中的路径
             if source_dir:
-                self.file_utils.copy_output_files_back(
+                output_files = self.file_utils.copy_output_files_back(
                     working_dir, source_dir, input_filenames=list(file_map.keys())
                 )
-            output_files = self.file_utils.collect_output_files(working_dir)
+            else:
+                output_files = self.file_utils.collect_output_files(working_dir)
             output = self._format_output(result)
             logs = get_log_buffer()
             if logs:

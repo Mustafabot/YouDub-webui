@@ -14,7 +14,7 @@ import wave
 
 auto_device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 separator = None
-_separator_lock = threading.Lock()
+_separator_lock = threading.RLock()
 
 _DEFAULT_MAX_CHUNK_SECONDS = 600
 _DEFAULT_SEGMENT = 10

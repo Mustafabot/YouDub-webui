@@ -1,5 +1,7 @@
 import os
 import shutil
+import tempfile
+import time
 import uuid
 from typing import Dict, List, Optional, Tuple
 from loguru import logger
@@ -132,6 +134,38 @@ class FileUtils:
         return "\n".join(lines)
 
     @staticmethod
+    def _is_system_temp_dir(path: str) -> bool:
+        """检测路径是否位于系统临时目录"""
+        temp_dir = os.path.normcase(os.path.abspath(tempfile.gettempdir()))
+        path_norm = os.path.normcase(os.path.abspath(path))
+        return path_norm.startswith(temp_dir)
+
+    @staticmethod
+    def _resolve_output_dir(fpath: str, user_output_dir: Optional[str] = None) -> str:
+        """解析最终输出目录"""
+        # 用户指定优先
+        if user_output_dir and user_output_dir.strip():
+            output_dir = FileUtils.resolve_folder_path(user_output_dir)
+            os.makedirs(output_dir, exist_ok=True)
+            return output_dir
+
+        # 否则用原文件所在目录
+        source_dir = os.path.dirname(os.path.abspath(fpath))
+
+        # 如果原文件在临时目录，用默认 output 目录
+        if FileUtils._is_system_temp_dir(source_dir):
+            output_root = os.path.join(str(PROJECT_ROOT), "output")
+            os.makedirs(output_root, exist_ok=True)
+            filename_base = os.path.splitext(os.path.basename(fpath))[0]
+            timestamp = time.strftime("%Y%m%d_%H%M%S")
+            output_dir = os.path.join(output_root, f"{filename_base}_{timestamp}")
+            os.makedirs(output_dir, exist_ok=True)
+            logger.info(f"检测到 Gradio 临时目录，默认输出到: {output_dir}")
+            return output_dir
+
+        return source_dir
+
+    @staticmethod
     def create_temp_working_dir(prefix: str) -> str:
         temp_root = os.path.join(str(PROJECT_ROOT), ".temp")
         os.makedirs(temp_root, exist_ok=True)
@@ -142,11 +176,37 @@ class FileUtils:
         return temp_dir
 
     @staticmethod
-    def prepare_single_input_dirs(file_paths: list, target_filename: str) -> List[Tuple[str, str]]:
+    def _copy_with_retry(src: str, dst: str, max_retries: int = 3) -> None:
+        """带重试的文件复制，应对 Windows 文件锁定（杀毒软件、Explorer 缩略图等）"""
+        last_error = None
+        for attempt in range(1, max_retries + 1):
+            try:
+                shutil.copy2(src, dst)
+                return
+            except PermissionError as e:
+                last_error = e
+                if attempt < max_retries:
+                    logger.warning(f"文件被占用，{attempt}/{max_retries} 次重试，等待 {attempt} 秒: {src}")
+                    time.sleep(attempt)
+        raise PermissionError(
+            f"无法复制文件，文件可能被其他程序占用（请关闭视频播放器、文件管理器等）:\n"
+            f"  源文件: {src}\n"
+            f"  目标: {dst}\n"
+            f"  已重试 {max_retries} 次均失败"
+        ) from last_error
+
+    @staticmethod
+    def prepare_single_input_dirs(file_paths: list, target_filename: str,
+                                  output_dir: Optional[str] = None) -> List[Tuple[str, str]]:
         """为每个输入文件创建临时工作目录，将文件复制进去
 
+        Args:
+            output_dir: 用户指定的输出目录。如果指定，回拷目标使用此目录；
+                        否则使用原文件所在目录；如果原文件在临时目录，
+                        则使用默认 output 目录。
+
         Returns:
-            List[Tuple[str, str]]: 每个元素为 (working_dir, source_dir)，source_dir 是输入文件的原始目录
+            List[Tuple[str, str]]: 每个元素为 (working_dir, source_dir)，source_dir 是回拷目标目录
         """
         dirs = []
         for file_path in file_paths:
@@ -156,8 +216,8 @@ class FileUtils:
                 continue
             base = os.path.splitext(os.path.basename(fpath))[0]
             working_dir = FileUtils.create_temp_working_dir(base)
-            shutil.copy2(fpath, os.path.join(working_dir, target_filename))
-            source_dir = os.path.dirname(os.path.abspath(fpath))
+            FileUtils._copy_with_retry(fpath, os.path.join(working_dir, target_filename))
+            source_dir = FileUtils._resolve_output_dir(fpath, output_dir)
             dirs.append((working_dir, source_dir))
         return dirs
 
@@ -169,7 +229,7 @@ class FileUtils:
             if not fpath or not os.path.exists(fpath):
                 logger.warning(f"文件不存在，跳过: {target_filename} <- {fpath}")
                 continue
-            shutil.copy2(fpath, os.path.join(working_dir, target_filename))
+            FileUtils._copy_with_retry(fpath, os.path.join(working_dir, target_filename))
         return working_dir
 
     @staticmethod
