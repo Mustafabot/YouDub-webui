@@ -196,9 +196,6 @@ def _download_demucs():
 
         for attempt in range(3):
             try:
-                if cached_file.exists():
-                    cached_file.unlink()
-                    logger.info(f"已清除旧缓存: {filename}")
                 logger.info(f"下载中 ({attempt+1}/3): {sig}")
                 pkg = torch.hub.load_state_dict_from_url(
                     url, map_location="cpu", check_hash=False

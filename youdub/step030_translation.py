@@ -2,6 +2,7 @@
 import json
 import os
 import re
+from collections import deque
 from openai import OpenAI
 import time
 from loguru import logger
@@ -186,7 +187,8 @@ def summarize(info, transcript, target_language='简体中文'):
         {'role': 'user',
             'content': f'The title of the video is "{title}". The summary of the video is "{summary}". Tags: {tags}.\nPlease translate the above title and summary and tags into {target_language} in JSON format. ```json\n{{"title": "", "summary", ""， "tags": []}}\n```. Remember to tranlate the title and the summary and tags into {target_language} in JSON.'},
     ]
-    while True:
+    max_retries = 10
+    for retry in range(max_retries):
         try:
             api_params = get_api_params()
             response = client.chat.completions.create(
@@ -203,7 +205,7 @@ def summarize(info, transcript, target_language='简体中文'):
             if target_language in summary['title'] or target_language in summary['summary']:
                 raise Exception('Invalid translation')
             title = summary['title'].strip()
-            if (title.startswith('"') and title.endswith('"')) or (title.startswith('“') and title.endswith('”')) or (title.startswith('‘') and title.endswith('’')) or (title.startswith("'") and title.endswith("'")) or (title.startswith('《') and title.endswith('》')):
+            if (title.startswith('“') and title.endswith('”')) or (title.startswith('"') and title.endswith('"')) or (title.startswith('‘') and title.endswith('’')) or (title.startswith("'") and title.endswith("'")) or (title.startswith('《') and title.endswith('》')):
                 title = title[1:-1]
             result = {
                 'title': title,
@@ -214,8 +216,9 @@ def summarize(info, transcript, target_language='简体中文'):
             }
             return result
         except Exception as e:
-            logger.warning(f'总结翻译失败\n{e}')
+            logger.warning(f'总结翻译失败 (重试 {retry+1}/{max_retries})\n{e}')
             time.sleep(1)
+    raise RuntimeError(f"摘要翻译在 {max_retries} 次重试后仍然失败")
 
 
 def translation_postprocess(result):
@@ -234,12 +237,12 @@ def valid_translation(text, translation):
         translation = translation[3:-3]
         return True, translation_postprocess(translation)
     
-    if (translation.startswith('“') and translation.endswith('”')) or (translation.startswith('"') and translation.endswith('"')):
+    if (translation.startswith('"') and translation.endswith('"')) or (translation.startswith('"') and translation.endswith('"')):
         translation = translation[1:-1]
         return True, translation_postprocess(translation)
     
-    if '翻译' in translation and '：“' in translation and '”' in translation:
-        translation = translation.split('：“')[-1].split('”')[0]
+    if '翻译' in translation and '："' in translation and '"' in translation:
+        translation = translation.split('："')[-1].split('"')[0]
         return True, translation_postprocess(translation)
     
     if '翻译' in translation and '："' in translation and '"' in translation:
@@ -264,7 +267,7 @@ def valid_translation(text, translation):
             return False, f"Don't include `{word}` in the translation. Only translate the following sentence and give me the result."
     
     return True, translation_postprocess(translation)
-# def split_sentences(translation, punctuations=['。', '？', '！', '\n', '”', '"']):
+# def split_sentences(translation, punctuations=['。', '？', '！', '\n', '"', '"']):
 #     def is_punctuation(char):
 #         return char in punctuations
     
@@ -354,15 +357,15 @@ def _translate(summary, transcript, target_language='简体中文'):
         {'role': 'system', 'content': system_prompt},
     ] + fewshot
     
-    history = []
+    history = deque(maxlen=30)
     for line in transcript:
         text = line['text']
         # history = ''.join(full_translation[:-10])
-        
+
         retry_message = 'Only translate the quoted sentence and give me the final translation.'
         for retry in range(30):
             messages = fixed_message + \
-                history[-30:] + [{'role': 'user',
+                list(history) + [{'role': 'user',
                                   'content': f'使用地道的中文Translate:"{text}"'}]
             
             try:
@@ -394,7 +397,7 @@ def _translate(summary, transcript, target_language='简体中文'):
                 time.sleep(1)
         full_translation.append(translation)
         history.append({'role': 'user', 'content': f'Translate:"{text}"'})
-        history.append({'role': 'assistant', 'content': f'翻译：“{translation}”'})
+        history.append({'role': 'assistant', 'content': f'翻译："{translation}"'})
         time.sleep(0.1)
 
     return full_translation

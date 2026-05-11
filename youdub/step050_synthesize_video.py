@@ -125,16 +125,20 @@ def get_aspect_ratio(video_path):
 
 
 def convert_resolution(aspect_ratio, resolution='1080p'):
+    width_val = int(str(resolution).rstrip('p'))
+    if width_val <= 0:
+        width_val = 1080
+        logger.warning(f"无效分辨率 '{resolution}'，使用默认 1080p")
     if aspect_ratio < 1:
-        width = int(resolution[:-1])
+        width = width_val
         height = int(width / aspect_ratio)
     else:
-        height = int(resolution[:-1])
+        height = width_val
         width = int(height * aspect_ratio)
     # make sure width and height are divisibal by 2
     width = width - width % 2
     height = height - height % 2
-    
+
     # return f'{width}x{height}'
     return width, height
     

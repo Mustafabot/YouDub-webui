@@ -1,5 +1,6 @@
 import sys
 import os
+import threading
 from collections import deque
 from loguru import logger
 
@@ -11,6 +12,7 @@ FORMAT_FILE = "<green>{time:YYYY-MM-DD HH:mm:ss.SSS}</green> | <level>{level: <8
 FORMAT_CONSOLE = "<green>{time:HH:mm:ss.SSS}</green> | <level>{level: <8}</level> | <cyan>{name}</cyan>:<cyan>{line}</cyan> - <level>{message}</level>"
 
 _log_buffer = deque(maxlen=1000)
+_buffer_lock = threading.Lock()
 
 _INITIALIZED = False
 
@@ -23,7 +25,8 @@ def _buffer_sink(message):
         f"{record['name']}:{record['line']} - "
         f"{record['message']}"
     )
-    _log_buffer.append(formatted)
+    with _buffer_lock:
+        _log_buffer.append(formatted)
 
 
 def init_logging():
@@ -58,13 +61,15 @@ def init_logging():
 
 
 def get_log_buffer(clear=True):
-    if not _log_buffer:
-        return ""
-    lines = list(_log_buffer)
-    if clear:
-        _log_buffer.clear()
+    with _buffer_lock:
+        if not _log_buffer:
+            return ""
+        lines = list(_log_buffer)
+        if clear:
+            _log_buffer.clear()
     return "\n".join(lines)
 
 
 def clear_log_buffer():
-    _log_buffer.clear()
+    with _buffer_lock:
+        _log_buffer.clear()

@@ -150,7 +150,8 @@ def generate_wavs(folder, force_bytedance=False):
     
     # IndexTTS 不使用 ref_text 参数，无需构建参考文本映射
 
-    full_wav = np.zeros((0, ))
+    wav_segments = []
+    cumulative_samples = 0
     total_segments = len(transcript)
     for i, line in enumerate(transcript):
         speaker = line['speaker']
@@ -168,10 +169,12 @@ def generate_wavs(folder, force_bytedance=False):
         start = line['start']
         end = line['end']
         length = end-start
-        last_end = len(full_wav)/24000
+        last_end = cumulative_samples / 24000
         if start > last_end:
-            full_wav = np.concatenate((full_wav, np.zeros((int((start - last_end) * 24000), ))))
-        start = len(full_wav)/24000
+            silence = np.zeros((int((start - last_end) * 24000), ))
+            wav_segments.append(silence)
+            cumulative_samples += len(silence)
+        start = cumulative_samples / 24000
         line['start'] = start
         if i < len(transcript) - 1:
             next_line = transcript[i+1]
@@ -181,11 +184,19 @@ def generate_wavs(folder, force_bytedance=False):
         wav = distribute_extra_silence(wav, 24000, end - start)
         length = len(wav) / 24000
 
-        full_wav = np.concatenate((full_wav, wav))
+        wav_segments.append(wav)
+        cumulative_samples += len(wav)
         line['end'] = start + length
+
+    full_wav = np.concatenate(wav_segments) if wav_segments else np.zeros((0,))
         
     vocal_wav, sr = librosa.load(os.path.join(folder, 'audio_vocals.wav'), sr=24000)
-    full_wav = full_wav / np.max(np.abs(full_wav)) * np.max(np.abs(vocal_wav))
+    max_full = np.max(np.abs(full_wav)) if len(full_wav) > 0 else 0
+    max_vocal = np.max(np.abs(vocal_wav)) if len(vocal_wav) > 0 else 0
+    if max_full > 1e-8 and max_vocal > 1e-8:
+        full_wav = full_wav / max_full * max_vocal
+    elif max_full < 1e-8:
+        logger.warning("TTS 输出为静音，跳过归一化")
     save_wav(full_wav, os.path.join(folder, 'audio_tts.wav'))
     with open(transcript_path, 'w', encoding='utf-8') as f:
         json.dump(transcript, f, indent=2, ensure_ascii=False)

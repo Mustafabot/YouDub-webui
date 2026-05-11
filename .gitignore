@@ -172,7 +172,7 @@ youdub/config.json
 .trae/
 bin/
 test_retry/
-AGENTS.md
-CLAUDE.md
+*.md
+
 .claude
 .temp

@@ -1,4 +1,5 @@
 import shutil
+import threading
 from demucs.api import Separator
 import os
 import subprocess
@@ -13,6 +14,7 @@ import wave
 
 auto_device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 separator = None
+_separator_lock = threading.Lock()
 
 _DEFAULT_MAX_CHUNK_SECONDS = 600
 _DEFAULT_SEGMENT = 10
@@ -25,25 +27,27 @@ def init_demucs(model_name: str = "htdemucs_ft", device: str = 'auto', progress:
 def cleanup_demucs():
     """清理 Demucs 模型，释放显存"""
     global separator
-    if separator is not None:
-        del separator
-        separator = None
-    gc.collect()
-    if torch.cuda.is_available():
-        torch.cuda.empty_cache()
+    with _separator_lock:
+        if separator is not None:
+            del separator
+            separator = None
+            gc.collect()
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
     logger.info('Demucs 模型已清理，显存已释放')
 
 def load_model(model_name: str = "htdemucs_ft", device: str = 'auto', progress: bool = True, shifts: int=5, segment: int = _DEFAULT_SEGMENT) -> Separator:
     global separator
-    logger.info(f'Loading Demucs model: {model_name} (device={device}, shifts={shifts}, segment={segment}s)')
-    t_start = time.time()
-    effective_device = auto_device if device=='auto' else device
-    torch.hub.set_dir(str(MODEL_ROOT / "demucs"))
-    separator = Separator(model_name, device=effective_device, progress=progress, shifts=shifts, segment=segment)
-    for sub in separator.model.models:
-        sub.use_train_segment = False
-    t_end = time.time()
-    logger.info(f'Demucs model loaded in {t_end - t_start:.2f} seconds')
+    with _separator_lock:
+        logger.info(f'Loading Demucs model: {model_name} (device={device}, shifts={shifts}, segment={segment}s)')
+        t_start = time.time()
+        effective_device = auto_device if device=='auto' else device
+        torch.hub.set_dir(str(MODEL_ROOT / "demucs"))
+        separator = Separator(model_name, device=effective_device, progress=progress, shifts=shifts, segment=segment)
+        for sub in separator.model.models:
+            sub.use_train_segment = False
+        t_end = time.time()
+        logger.info(f'Demucs model loaded in {t_end - t_start:.2f} seconds')
 
 def _get_audio_duration(audio_path: str) -> float:
     with wave.open(audio_path, 'rb') as wf:
@@ -111,6 +115,10 @@ def _merge_instruments(separated: dict):
 
 def separate_audio(folder: str, model_name: str = "htdemucs_ft", device: str = 'auto', progress: bool = True, shifts: int = 5, segment: int = _DEFAULT_SEGMENT, max_chunk_seconds: int = _DEFAULT_MAX_CHUNK_SECONDS) -> None:
     global separator
+    with _separator_lock:
+        if separator is None:
+            load_model(model_name, device, progress, shifts, segment)
+        local_sep = separator
     audio_path = os.path.join(folder, 'audio.wav')
     if not os.path.exists(audio_path):
         raise FileNotFoundError(f'音频文件不存在: {audio_path}，请确认步骤01已正确执行')

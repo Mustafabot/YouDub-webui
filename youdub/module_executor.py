@@ -155,6 +155,8 @@ class ModuleExecutor:
                     logger.info(f"[{idx}/{total}] 模块 {module_name} 执行成功")
                     results.append({"module": module_id, "status": "success", "result": result})
                     break
+                except (KeyboardInterrupt, SystemExit):
+                    raise
                 except Exception as e:
                     logger.error(f"[{idx}/{total}] 模块 {module_name} 执行失败: {e}")
                     if retry == max_retries - 1:

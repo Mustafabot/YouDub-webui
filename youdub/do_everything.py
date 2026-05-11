@@ -255,8 +255,11 @@ def do_everything(root_folder, url=None, local_video_paths=None, num_videos=5, r
     if local_video_paths is not None and len(local_video_paths) > 0:
         video_info_iterator = get_info_list_from_local(local_video_paths, root_folder)
     elif url is not None and url.strip():
-        url = url.replace(" ", "").replace("，", "\n").replace(",", "\n")
-        urls = [_ for _ in url.split("\n") if _]
+        import re as _re
+        parts = _re.split(r'[\n,，]', url.replace(' ', ''))
+        urls = [p.strip() for p in parts if p.strip() and (p.strip().startswith('http://') or p.strip().startswith('https://'))]
+        if not urls:
+            return "Error: 未找到有效的 URL（URL 需以 http:// 或 https:// 开头）"
         video_info_iterator = get_info_list_from_url(urls, num_videos)
     else:
         return "Error: Please provide either video URL(s), local video file(s), or selected folders"

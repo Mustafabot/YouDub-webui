@@ -1,4 +1,5 @@
 import os
+import shutil
 from typing import Callable, List, Optional, Tuple
 from loguru import logger
 from ..log_config import get_log_buffer, clear_log_buffer
@@ -11,6 +12,15 @@ class ExecutionService:
     def __init__(self):
         self.error_handler = ErrorHandler()
         self.file_utils = FileUtils()
+
+    def _format_output(self, result) -> str:
+        """统一格式化模块返回值，确保始终返回 str"""
+        if not result:
+            return "✅ 操作已完成"
+        result_str = str(result)
+        if result_str.startswith("❌"):
+            return result_str
+        return f"✅ {result_str}"
 
     def execute_with_wrapper(
         self,
@@ -39,7 +49,7 @@ class ExecutionService:
         clear_log_buffer()
         try:
             result = module_function(folder, **kwargs)
-            output = f"✅ {result}" if result and not str(result).startswith("❌") else result
+            output = self._format_output(result)
             logs = get_log_buffer()
             if logs:
                 return f"{logs}\n\n{output}"
@@ -75,7 +85,7 @@ class ExecutionService:
             clear_log_buffer()
             try:
                 result = batch_function(selected_folders, **kwargs)
-                output = f"✅ {result}" if result and not str(result).startswith("❌") else result
+                output = self._format_output(result)
                 logs = get_log_buffer()
                 if logs:
                     return f"{logs}\n\n{output}"
@@ -134,7 +144,7 @@ class ExecutionService:
                     working_dir, source_dir, input_filenames=[target_filename]
                 )
                 output_files.extend(self.file_utils.collect_output_files(working_dir))
-            output = f"✅ {result}" if result and not str(result).startswith("❌") else result
+            output = self._format_output(result)
             logs = get_log_buffer()
             if logs:
                 output = f"{logs}\n\n{output}"
@@ -151,6 +161,12 @@ class ExecutionService:
             if logs:
                 return f"{logs}\n\n{error_result}", []
             return error_result, []
+        finally:
+            for working_dir, _ in working_dir_pairs:
+                try:
+                    shutil.rmtree(working_dir, ignore_errors=True)
+                except Exception:
+                    pass
 
     def execute_single_with_files(
         self,
@@ -175,7 +191,13 @@ class ExecutionService:
                 fpath = filepath.name if hasattr(filepath, 'name') else filepath
                 if fpath and os.path.exists(fpath):
                     source_paths.append(os.path.dirname(os.path.abspath(fpath)))
-        source_dir = os.path.commonpath(source_paths) if source_paths else None
+        source_dir = None
+        if source_paths:
+            try:
+                source_dir = os.path.commonpath(source_paths)
+            except ValueError:
+                logger.warning("输入文件跨盘符，输出将回拷到第一个文件所在目录")
+                source_dir = source_paths[0]
 
         working_dir = self.file_utils.prepare_multi_input_dir(file_map)
 
@@ -188,7 +210,7 @@ class ExecutionService:
                     working_dir, source_dir, input_filenames=list(file_map.keys())
                 )
             output_files = self.file_utils.collect_output_files(working_dir)
-            output = f"✅ {result}" if result and not str(result).startswith("❌") else result
+            output = self._format_output(result)
             logs = get_log_buffer()
             if logs:
                 output = f"{logs}\n\n{output}"
@@ -205,15 +227,21 @@ class ExecutionService:
             if logs:
                 return f"{logs}\n\n{error_result}", []
             return error_result, []
+        finally:
+            try:
+                shutil.rmtree(working_dir, ignore_errors=True)
+            except Exception:
+                pass
 
     def wrap_with_logs(self, func: Callable, *args, **kwargs) -> str:
         clear_log_buffer()
         try:
             result = func(*args, **kwargs)
+            output = self._format_output(result)
             logs = get_log_buffer()
             if logs:
-                return f"{logs}\n\n{result}"
-            return result
+                return f"{logs}\n\n{output}"
+            return output
         except Exception as e:
             logs = get_log_buffer()
             logger.error(f"执行失败: {e}")

@@ -1,4 +1,5 @@
 import os
+from loguru import logger
 from .config import get_config, check_network, get_config_status
 
 MODULES = {
@@ -296,5 +297,11 @@ def get_execution_order(module_ids):
             in_degree[neighbor] -= 1
             if in_degree[neighbor] == 0:
                 queue.append(neighbor)
-    
+
+    if len(result) != len(module_ids):
+        missing = set(module_ids) - set(result)
+        logger.error(f"检测到模块依赖循环，以下模块无法排序: {missing}")
+        raise ValueError(
+            f"模块依赖循环: {', '.join(missing)}。请检查 MODULES 定义中的 depends 字段。"
+        )
     return result

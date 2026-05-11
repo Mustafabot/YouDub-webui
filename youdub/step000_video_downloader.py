@@ -294,6 +294,42 @@ def process_local_video(video_info, folder_path):
     return output_folder
 
 
+def _download_video_into_dir(info, target_dir, resolution='1080p'):
+    """直接将视频下载到指定目录，不创建子文件夹"""
+    ffmpeg_available, ffmpeg_msg = ensure_ffmpeg_available(auto_download=True)
+    if not ffmpeg_available:
+        raise RuntimeError(
+            f'FFmpeg 不可用，无法进行视频下载和合并。{ffmpeg_msg}\n'
+            f'请按以下方式之一安装 FFmpeg：\n'
+            f'1. 运行 python scripts/download_ffmpeg.py 自动下载\n'
+            f'2. Windows: 从 https://ffmpeg.org/download.html 下载，解压后将 bin 目录添加到系统 PATH，或在配置中设置 FFMPEG_PATH\n'
+            f'3. macOS: brew install ffmpeg\n'
+            f'4. Linux: sudo apt install ffmpeg'
+        )
+
+    resolution_num = resolution.replace('p', '')
+    ffmpeg_path = get_ffmpeg_path()
+    ydl_opts = {
+        'format': f'bestvideo[ext=mp4][height<={resolution_num}]+bestaudio[ext=m4a]/best[ext=mp4]/best',
+        'outtmpl': os.path.join(target_dir, 'download'),
+        'ignoreerrors': True,
+        'merge_output_format': 'mp4',
+        'ffmpeg_location': ffmpeg_path,
+    }
+
+    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+        ydl.download([info['webpage_url']])
+
+    if not os.path.exists(os.path.join(target_dir, 'download.mp4')):
+        raise FileNotFoundError(
+            f'下载完成但未找到 download.mp4，请检查 ffmpeg 是否已安装且可用。'
+            f'目录内容: {os.listdir(target_dir) if os.path.exists(target_dir) else "目录不存在"}'
+        )
+
+    logger.info(f'Video downloaded directly into {target_dir}')
+    return target_dir
+
+
 def download_all_videos_under_folder(root_folder, url=None, video_path=None, resolution="1080p", num_videos=5):
     """扫描文件夹下载待下载的视频"""
     if not os.path.isabs(root_folder):
@@ -308,8 +344,9 @@ def download_all_videos_under_folder(root_folder, url=None, video_path=None, res
         info_path = os.path.join(root, 'download.info.json')
         with open(info_path, 'r', encoding='utf-8') as f:
             info = json.load(f)
-        parent = os.path.dirname(root)
-        download_single_video(info, parent, resolution)
+        # Download directly into root where download.info.json already exists,
+        # rather than letting download_single_video recreate the folder hierarchy
+        _download_video_into_dir(info, root, resolution)
     if not found_video_dir:
         logger.info(f'No videos to download under {root_folder}')
     return f'Downloaded all videos under {root_folder}'

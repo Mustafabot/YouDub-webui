@@ -1,6 +1,7 @@
 import json
 import os
 import time
+import threading
 from contextlib import contextmanager
 import librosa
 import numpy as np
@@ -44,10 +45,11 @@ def _ffmpeg_in_path():
         yield
         return
     ffmpeg_dir = os.path.dirname(ffmpeg_path)
-    if ffmpeg_dir in os.environ['PATH']:
+    current_path = os.environ.get('PATH', '')
+    if ffmpeg_dir in current_path:
         yield
         return
-    original_path = os.environ['PATH']
+    original_path = current_path
     os.environ['PATH'] = ffmpeg_dir + os.pathsep + original_path
     try:
         yield
@@ -60,6 +62,8 @@ diarize_model = None
 align_model = None
 language_code = None
 align_metadata = None
+
+_model_lock = threading.Lock()
 
 def init_whisperx():
     pass
@@ -266,9 +270,11 @@ def generate_speaker_audio(folder, transcript):
         os.makedirs(speaker_folder)
     
     for speaker, segments in speaker_segments.items():
-        speaker_file_path = os.path.join(
-            speaker_folder, f"{speaker}.wav")
-        save_wav(np.concatenate(segments), speaker_file_path)
+        speaker_file_path = os.path.join(speaker_folder, f"{speaker}.wav")
+        if segments:
+            save_wav(np.concatenate(segments), speaker_file_path)
+        else:
+            logger.warning(f"说话人 {speaker} 无有效音频段，跳过保存")
             
 
 def transcribe_all_audio_under_folder(folder, model_name: str = 'large', download_root='models/ASR/whisper', device='auto', batch_size=None, diarization=True, min_speakers=None, max_speakers=None):
@@ -279,22 +285,33 @@ def transcribe_all_audio_under_folder(folder, model_name: str = 'large', downloa
     if not os.path.isabs(download_root):
         download_root = str(PROJECT_ROOT / download_root)
     found_video_dir = False
+    success_list = []
+    fail_list = []
     try:
         for root, dirs, files in os.walk(folder):
             if 'download.mp4' not in files and 'audio.wav' not in files and 'audio_vocals.wav' not in files and 'transcript.json' not in files:
                 continue
             found_video_dir = True
             if 'audio_vocals.wav' not in files:
-                raise FileNotFoundError(
-                    f'发现视频目录 {root} 但缺少 audio_vocals.wav，请确认音频分离步骤已正确执行。目录内容: {files}'
-                )
-            if 'transcript.json' in files:
+                fail_list.append(f"{root}: 缺少 audio_vocals.wav")
+                logger.error(f"目录 {root} 转录失败: 缺少 audio_vocals.wav")
                 continue
-            transcribe_audio(root, model_name,
-                             download_root, device, batch_size, diarization, min_speakers, max_speakers)
+            if 'transcript.json' in files:
+                success_list.append(root)
+                continue
+            try:
+                transcribe_audio(root, model_name, download_root, device, batch_size, diarization, min_speakers, max_speakers)
+                success_list.append(root)
+            except Exception as e:
+                logger.error(f"目录 {root} 转录失败: {e}")
+                fail_list.append(f"{root}: {e}")
         if not found_video_dir:
             raise FileNotFoundError(f'在 {folder} 下未找到任何视频处理目录')
-        return f'Transcribed all audio under {folder}'
+        summary = f'语音识别完成: 成功 {len(success_list)}, 失败 {len(fail_list)}'
+        logger.info(summary)
+        if fail_list:
+            logger.warning(f'失败详情: {fail_list}')
+        return summary
     finally:
         cleanup_whisperx()
 
@@ -303,21 +320,22 @@ def cleanup_whisperx():
     global whisper_model, align_model, language_code, align_metadata, diarize_model
     import gc
     import torch
-    
-    if whisper_model is not None:
-        del whisper_model
-        whisper_model = None
-    
-    if align_model is not None:
-        del align_model
-        align_model = None
-        language_code = None
-        align_metadata = None
-    
-    if diarize_model is not None:
-        del diarize_model
-        diarize_model = None
-    
+
+    with _model_lock:
+        if whisper_model is not None:
+            del whisper_model
+            whisper_model = None
+
+        if align_model is not None:
+            del align_model
+            align_model = None
+            language_code = None
+            align_metadata = None
+
+        if diarize_model is not None:
+            del diarize_model
+            diarize_model = None
+
     gc.collect()
     if torch.cuda.is_available():
         torch.cuda.synchronize()
