@@ -142,7 +142,12 @@ class FileUtils:
         return temp_dir
 
     @staticmethod
-    def prepare_single_input_dirs(file_paths: list, target_filename: str) -> List[str]:
+    def prepare_single_input_dirs(file_paths: list, target_filename: str) -> List[Tuple[str, str]]:
+        """为每个输入文件创建临时工作目录，将文件复制进去
+
+        Returns:
+            List[Tuple[str, str]]: 每个元素为 (working_dir, source_dir)，source_dir 是输入文件的原始目录
+        """
         dirs = []
         for file_path in file_paths:
             fpath = file_path.name if hasattr(file_path, 'name') else file_path
@@ -152,7 +157,8 @@ class FileUtils:
             base = os.path.splitext(os.path.basename(fpath))[0]
             working_dir = FileUtils.create_temp_working_dir(base)
             shutil.copy2(fpath, os.path.join(working_dir, target_filename))
-            dirs.append(working_dir)
+            source_dir = os.path.dirname(os.path.abspath(fpath))
+            dirs.append((working_dir, source_dir))
         return dirs
 
     @staticmethod
@@ -176,6 +182,41 @@ class FileUtils:
             if os.path.isfile(fpath):
                 files.append(fpath)
         return sorted(files)
+
+    @staticmethod
+    def copy_output_files_back(working_dir: str, source_dir: str,
+                                input_filenames: Optional[List[str]] = None) -> List[str]:
+        """将 working_dir 中处理产生的新文件复制回 source_dir
+
+        Args:
+            working_dir: 临时工作目录
+            source_dir: 原始源文件目录
+            input_filenames: 输入文件名列表（这些文件不会被复制回源目录）
+
+        Returns:
+            List[str]: 成功复制到 source_dir 的文件路径列表
+        """
+        if not os.path.exists(working_dir):
+            return []
+        if not os.path.exists(source_dir):
+            os.makedirs(source_dir, exist_ok=True)
+
+        exclude = set(input_filenames or [])
+        copied = []
+        for f in os.listdir(working_dir):
+            if f in exclude:
+                continue
+            src_path = os.path.join(working_dir, f)
+            if not os.path.isfile(src_path):
+                continue
+            dest_path = os.path.join(source_dir, f)
+            try:
+                shutil.copy2(src_path, dest_path)
+                logger.info(f"输出文件已回拷: {f} -> {dest_path}")
+                copied.append(dest_path)
+            except Exception as e:
+                logger.warning(f"回拷文件失败 {f}: {e}")
+        return copied
 
     @staticmethod
     def resolve_folder_path(folder: str) -> str:

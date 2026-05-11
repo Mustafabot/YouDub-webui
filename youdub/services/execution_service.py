@@ -114,20 +114,26 @@ class ExecutionService:
                 ["请选择对应的输入文件"]
             ), []
 
-        working_dirs = self.file_utils.prepare_single_input_dirs(file_paths, target_filename)
-        if not working_dirs:
+        working_dir_pairs = self.file_utils.prepare_single_input_dirs(file_paths, target_filename)
+        if not working_dir_pairs:
             return self.error_handler.format_error(
                 "文件准备失败",
                 ["无法为选中的文件创建工作目录"],
                 ["请检查文件是否存在且可读"]
             ), []
 
+        working_dirs = [pair[0] for pair in working_dir_pairs]
+
         clear_log_buffer()
         try:
             result = batch_function(working_dirs, **kwargs)
             output_files = []
-            for d in working_dirs:
-                output_files.extend(self.file_utils.collect_output_files(d))
+            for (working_dir, source_dir) in working_dir_pairs:
+                # 将处理产生的输出文件回拷到原始源目录
+                self.file_utils.copy_output_files_back(
+                    working_dir, source_dir, input_filenames=[target_filename]
+                )
+                output_files.extend(self.file_utils.collect_output_files(working_dir))
             output = f"✅ {result}" if result and not str(result).startswith("❌") else result
             logs = get_log_buffer()
             if logs:
@@ -162,11 +168,25 @@ class ExecutionService:
                 ["请选择所有必要的输入文件"]
             ), []
 
+        # 确定原始源目录：取所有输入文件的公共父目录
+        source_paths = []
+        for filepath in file_map.values():
+            if filepath:
+                fpath = filepath.name if hasattr(filepath, 'name') else filepath
+                if fpath and os.path.exists(fpath):
+                    source_paths.append(os.path.dirname(os.path.abspath(fpath)))
+        source_dir = os.path.commonpath(source_paths) if source_paths else None
+
         working_dir = self.file_utils.prepare_multi_input_dir(file_map)
 
         clear_log_buffer()
         try:
             result = single_function(working_dir, **kwargs)
+            # 将处理产生的输出文件回拷到原始源目录
+            if source_dir:
+                self.file_utils.copy_output_files_back(
+                    working_dir, source_dir, input_filenames=list(file_map.keys())
+                )
             output_files = self.file_utils.collect_output_files(working_dir)
             output = f"✅ {result}" if result and not str(result).startswith("❌") else result
             logs = get_log_buffer()
