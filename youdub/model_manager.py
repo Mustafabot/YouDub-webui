@@ -12,13 +12,13 @@ from .utils import install_package_with_mirrors
 
 def _install_indextts_package():
     """安装 indextts Python 库（使用多镜像回退）"""
-    if install_package_with_mirrors("indextts", timeout=600):
+    if install_package_with_mirrors("git+https://github.com/index-tts/index-tts.git", timeout=600):
         logger.info("indextts 库安装成功")
         return True
     raise RuntimeError(
         "indextts 库安装失败。请尝试手动安装:\n"
         "  1. 配置 pip 镜像: pip config set global.index-url https://pypi.tuna.tsinghua.edu.cn/simple\n"
-        "  2. 手动安装: pip install indextts"
+        "  2. 手动安装: pip install git+https://github.com/index-tts/index-tts.git"
     )
 
 

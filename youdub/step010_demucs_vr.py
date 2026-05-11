@@ -40,6 +40,8 @@ def load_model(model_name: str = "htdemucs_ft", device: str = 'auto', progress: 
     effective_device = auto_device if device=='auto' else device
     torch.hub.set_dir(str(MODEL_ROOT / "demucs"))
     separator = Separator(model_name, device=effective_device, progress=progress, shifts=shifts, segment=segment)
+    for sub in separator.model.models:
+        sub.use_train_segment = False
     t_end = time.time()
     logger.info(f'Demucs model loaded in {t_end - t_start:.2f} seconds')
 
@@ -338,6 +340,8 @@ def separate_all_audio_under_folder(root_folder: str, model_name: str = "htdemuc
     global separator
     found_video_dir = False
     processed_dirs = set()
+    success_list = []
+    fail_list = []
     
     logger.info(f'开始遍历目录: {root_folder}')
     try:
@@ -349,27 +353,30 @@ def separate_all_audio_under_folder(root_folder: str, model_name: str = "htdemuc
             video_path = os.path.join(subdir, 'download.mp4')
             if not os.path.exists(video_path):
                 if os.path.exists(os.path.join(subdir, 'download.info.json')):
-                    raise FileNotFoundError(
-                        f'发现视频目录 {subdir} 但缺少 download.mp4，'
-                        f'请确认下载步骤已正确执行。'
-                    )
+                    fail_list.append(f"{subdir}: 缺少 download.mp4")
                 continue
             
             found_video_dir = True
             logger.info(f'处理视频目录: {subdir}')
             
-            audio_path = os.path.join(subdir, 'audio.wav')
-            if not os.path.exists(audio_path):
-                logger.info(f'提取音频: {subdir}')
-                extract_audio_from_video(subdir)
-            
-            vocal_output_path = os.path.join(subdir, 'audio_vocals.wav')
-            instruments_output_path = os.path.join(subdir, 'audio_instruments.wav')
-            if not os.path.exists(vocal_output_path) or not os.path.exists(instruments_output_path):
-                logger.info(f'分离人声和伴奏: {subdir}')
-                separate_audio(subdir, model_name, device, progress, shifts, segment, max_chunk_seconds)
-            else:
-                logger.info(f'音频已分离，跳过: {subdir}')
+            try:
+                audio_path = os.path.join(subdir, 'audio.wav')
+                if not os.path.exists(audio_path):
+                    logger.info(f'提取音频: {subdir}')
+                    extract_audio_from_video(subdir)
+                
+                vocal_output_path = os.path.join(subdir, 'audio_vocals.wav')
+                instruments_output_path = os.path.join(subdir, 'audio_instruments.wav')
+                if not os.path.exists(vocal_output_path) or not os.path.exists(instruments_output_path):
+                    logger.info(f'分离人声和伴奏: {subdir}')
+                    separate_audio(subdir, model_name, device, progress, shifts, segment, max_chunk_seconds)
+                else:
+                    logger.info(f'音频已分离，跳过: {subdir}')
+                
+                success_list.append(subdir)
+            except Exception as e:
+                logger.error(f'Error separating audio in {subdir}: {e}')
+                fail_list.append(f"{subdir}: {e}")
             
             processed_dirs.add(subdir)
             gc.collect()
@@ -379,8 +386,8 @@ def separate_all_audio_under_folder(root_folder: str, model_name: str = "htdemuc
         if not found_video_dir:
             raise FileNotFoundError(f'在 {root_folder} 下未找到任何包含 download.mp4 的视频目录')
 
-        logger.info(f'All audio separated under {root_folder}')
-        return f'All audio separated under {root_folder}'
+        logger.info(f'音频分离完成: 成功 {len(success_list)}/{len(processed_dirs)}, 失败 {len(fail_list)}')
+        return f'成功: {len(success_list)}\n失败: {len(fail_list)}'
     finally:
         cleanup_demucs()
 

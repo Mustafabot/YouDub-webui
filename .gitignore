@@ -173,3 +173,6 @@ youdub/config.json
 bin/
 test_retry/
 AGENTS.md
+CLAUDE.md
+.claude
+.temp

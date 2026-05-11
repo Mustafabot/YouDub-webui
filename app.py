@@ -1007,4 +1007,4 @@ def _check_dependency_compatibility():
 
 if __name__ == '__main__':
     _check_dependency_compatibility()
-    app.launch(server_port=19876)
+    app.launch(server_port=19876, inbrowser=True)

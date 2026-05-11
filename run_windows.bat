@@ -232,17 +232,17 @@ echo ============================================
 echo.
 echo [%date% %time%] All checks passed, starting application >> "%LOGFILE%"
 
-:: Auto-open browser after a short delay
-start "" cmd /c "timeout /t 3 /nobreak >nul && start http://127.0.0.1:19876"
+:: Browser will be auto-opened by Gradio once server is fully ready
+:: (see inbrowser=True in app.launch() call below)
 
 :: Record startup time for quick-failure detection
 set START_TIME=%time%
 
-:: Launch the application (inbrowser=False to prevent Gradio from opening its own browser)
+:: Launch the application (inbrowser=True lets Gradio open browser only when server is ready)
 if "!SHARE_FLAG!"=="1" (
-    python -c "from app import app; app.launch(share=True, inbrowser=False)"
+    python -c "from app import app; app.launch(share=True, inbrowser=True)"
 ) else (
-    python -c "from app import app; app.launch(server_port=19876, inbrowser=False)"
+    python -c "from app import app; app.launch(server_port=19876, inbrowser=True)"
 )
 
 IF %ERRORLEVEL% NEQ 0 (

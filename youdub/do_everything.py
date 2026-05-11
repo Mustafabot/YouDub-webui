@@ -94,6 +94,19 @@ def process_folder_with_modules(folder, params, selected_modules=None, skip_comp
     max_retries = params.get("max_retries", 3)
     results, success = executor.execute(folder, execution_plan, params, skip_completed, max_retries)
     
+    status_lines = []
+    for result in results:
+        mid = result["module"]
+        name = get_module(mid)["name"] if get_module(mid) else mid
+        status = result["status"]
+        if status == "success":
+            status_lines.append(f"  ✅ {name}")
+        elif status == "skipped":
+            status_lines.append(f"  ⏭️ {name}（已完成）")
+        elif status == "error":
+            status_lines.append(f"  ❌ {name}: {result.get('error', '未知错误')}")
+    logger.info(f"模块执行结果:\n" + "\n".join(status_lines))
+    
     if not success:
         for result in results:
             if result.get("status") == "error":

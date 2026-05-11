@@ -94,6 +94,7 @@ class ModuleExecutor:
         """执行模块列表"""
         results = []
         total = len(execution_plan)
+        failed_predecessor = None
         
         for idx, module_id in enumerate(execution_plan, 1):
             module = get_module(module_id)
@@ -112,7 +113,8 @@ class ModuleExecutor:
                 if not ffmpeg_ok:
                     logger.error(f"[{idx}/{total}] 模块 {module_name} 需要 FFmpeg: {ffmpeg_msg}")
                     results.append({"module": module_id, "status": "error", "error": ffmpeg_msg})
-                    return results, False
+                    failed_predecessor = module_id
+                    continue
             
             input_files = module.get("input_files", [])
             missing_inputs = []
@@ -126,13 +128,17 @@ class ModuleExecutor:
                     producer = get_input_file_producer(infile)
                     if producer:
                         producer_name = get_module(producer)["name"] if get_module(producer) else producer
-                        suggestions.append(f"{infile}（请先运行模块「{producer_name}」或手动准备该文件）")
+                        if producer == failed_predecessor:
+                            suggestions.append(f"{infile}（前置模块「{producer_name}」执行失败，无法生成此文件）")
+                        else:
+                            suggestions.append(f"{infile}（请先运行模块「{producer_name}」或手动准备该文件）")
                     else:
                         suggestions.append(f"{infile}（请手动准备该文件）")
                 msg = f"模块 {module_name} 缺少输入文件: " + "、".join(suggestions)
                 logger.error(f"[{idx}/{total}] {msg}")
                 results.append({"module": module_id, "status": "error", "error": msg})
-                return results, False
+                failed_predecessor = module_id
+                continue
             
             if module_id not in self.module_functions:
                 logger.warning(f"[{idx}/{total}] 模块 {module_name} 没有注册执行函数")
@@ -153,10 +159,11 @@ class ModuleExecutor:
                     logger.error(f"[{idx}/{total}] 模块 {module_name} 执行失败: {e}")
                     if retry == max_retries - 1:
                         results.append({"module": module_id, "status": "error", "error": str(e)})
-                        return results, False
+                        failed_predecessor = module_id
                     time.sleep(1)
         
-        return results, True
+        has_failure = any(r["status"] == "error" for r in results)
+        return results, not has_failure
     
     def _get_module_params(self, module_id, params):
         """根据模块ID提取对应的参数"""
