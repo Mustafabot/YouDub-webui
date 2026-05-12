@@ -142,17 +142,26 @@ class FileUtils:
 
     @staticmethod
     def _resolve_output_dir(fpath: str, user_output_dir: Optional[str] = None) -> str:
-        """解析最终输出目录"""
-        # 用户指定优先
+        """解析最终输出目录
+
+        Args:
+            fpath: 输入文件路径
+            user_output_dir: 用户指定的输出目录（直接使用，不创建子目录）
+
+        Returns:
+            str: 最终输出目录路径
+        """
+        # 用户指定优先 - 直接使用用户选择的目录，不创建子目录
         if user_output_dir and user_output_dir.strip():
             output_dir = FileUtils.resolve_folder_path(user_output_dir)
             os.makedirs(output_dir, exist_ok=True)
+            logger.info(f"使用用户指定输出目录: {output_dir}")
             return output_dir
 
         # 否则用原文件所在目录
         source_dir = os.path.dirname(os.path.abspath(fpath))
 
-        # 如果原文件在临时目录，用默认 output 目录
+        # 如果原文件在临时目录（Gradio上传），用默认 output 目录
         if FileUtils._is_system_temp_dir(source_dir):
             output_root = os.path.join(str(PROJECT_ROOT), "output")
             os.makedirs(output_root, exist_ok=True)
@@ -163,6 +172,7 @@ class FileUtils:
             logger.info(f"检测到 Gradio 临时目录，默认输出到: {output_dir}")
             return output_dir
 
+        logger.info(f"使用原文件目录作为输出目录: {source_dir}")
         return source_dir
 
     @staticmethod

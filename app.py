@@ -332,6 +332,21 @@ def deselect_all_modules():
     return [], format_execution_order([])
 
 
+def get_default_output_dirs():
+    """获取默认输出目录列表"""
+    default_dirs = ['output', 'videos', 'results']
+    # 确保目录存在
+    for d in default_dirs:
+        dir_path = os.path.join(str(PROJECT_ROOT), d)
+        os.makedirs(dir_path, exist_ok=True)
+    return default_dirs
+
+
+def set_output_dir(selected_dir):
+    """设置输出目录的回调函数"""
+    return selected_dir
+
+
 def toggle_input_mode(mode):
     if mode == '本地文件':
         return gr.update(visible=False), gr.update(visible=True)
@@ -626,8 +641,25 @@ with gr.Blocks(title='YouDub') as app:
             gr.Markdown("使用 Demucs 模型将视频中的人声和伴奏分离。选择视频文件，系统将自动创建临时目录并处理。")
             dm_files = gr.File(label='选择视频文件', file_count='multiple', type='filepath',
                                file_types=['.mp4', '.avi', '.mkv', '.mov', '.flv'])
-            dm_output_dir = gr.Textbox(label='输出目录', value='output',
-                                    info='处理结果保存目录，留空则默认到 output/{文件名}_{时间戳}')
+            gr.Markdown("**输出目录选择**")
+            with gr.Row():
+                dm_btn_output = gr.Button("📁 output", variant="primary")
+                dm_btn_videos = gr.Button("🎬 videos")
+                dm_btn_results = gr.Button("📊 results")
+                dm_btn_refresh = gr.Button("🔄 刷新")
+            dm_dir_dropdown = gr.Dropdown(
+                label='或选择其他目录',
+                choices=get_default_output_dirs(),
+                value='output',
+                allow_custom_value=False
+            )
+            dm_output_dir = gr.State('output')
+            # 绑定所有事件 - 返回两个值对应两个输出组件
+            dm_btn_output.click(lambda: ('output', 'output'), outputs=[dm_dir_dropdown, dm_output_dir])
+            dm_btn_videos.click(lambda: ('videos', 'videos'), outputs=[dm_dir_dropdown, dm_output_dir])
+            dm_btn_results.click(lambda: ('results', 'results'), outputs=[dm_dir_dropdown, dm_output_dir])
+            dm_btn_refresh.click(get_default_output_dirs, outputs=dm_dir_dropdown)
+            dm_dir_dropdown.change(lambda x: x, inputs=dm_dir_dropdown, outputs=dm_output_dir)
             dm_model = gr.Radio(['htdemucs', 'htdemucs_ft', 'htdemucs_6s', 'hdemucs_mmi', 'mdx', 'mdx_extra', 'mdx_q', 'mdx_extra_q', 'SIG'],
                         label='Model', value='htdemucs_ft')
             with gr.Accordion("高级设置", open=False):
@@ -649,8 +681,24 @@ with gr.Blocks(title='YouDub') as app:
             gr.Markdown("使用 WhisperX 模型将语音转换为文字，支持说话者分离。选择人声音频文件，系统将自动创建临时目录并处理。")
             ws_files = gr.File(label='选择人声音频文件', file_count='multiple', type='filepath',
                                file_types=['.wav', '.mp3', '.flac', '.m4a', '.aac'])
-            ws_output_dir = gr.Textbox(label='输出目录', value='output',
-                                    info='处理结果保存目录，留空则默认到 output/{文件名}_{时间戳}')
+            gr.Markdown("**输出目录选择**")
+            with gr.Row():
+                ws_btn_output = gr.Button("📁 output", variant="primary")
+                ws_btn_videos = gr.Button("🎬 videos")
+                ws_btn_results = gr.Button("📊 results")
+                ws_btn_refresh = gr.Button("🔄 刷新")
+            ws_dir_dropdown = gr.Dropdown(
+                label='或选择其他目录',
+                choices=get_default_output_dirs(),
+                value='output',
+                allow_custom_value=False
+            )
+            ws_output_dir = gr.State('output')
+            ws_btn_output.click(lambda: ('output', 'output'), outputs=[ws_dir_dropdown, ws_output_dir])
+            ws_btn_videos.click(lambda: ('videos', 'videos'), outputs=[ws_dir_dropdown, ws_output_dir])
+            ws_btn_results.click(lambda: ('results', 'results'), outputs=[ws_dir_dropdown, ws_output_dir])
+            ws_btn_refresh.click(get_default_output_dirs, outputs=ws_dir_dropdown)
+            ws_dir_dropdown.change(lambda x: x, inputs=ws_dir_dropdown, outputs=ws_output_dir)
             ws_model = gr.Radio(['large', 'medium', 'small', 'base', 'tiny'], label='Model', value='large')
             ws_diarization = gr.Checkbox(label='Diarization', value=True,
                          info='启用说话者分离，区分不同说话人')
@@ -677,8 +725,24 @@ with gr.Blocks(title='YouDub') as app:
                                          file_types=['.json'])
             tl_info_file = gr.File(label='视频信息文件 (download.info.json)', file_count='single', type='filepath',
                                    file_types=['.json'])
-            tl_output_dir = gr.Textbox(label='输出目录', value='output',
-                                    info='处理结果保存目录，留空则默认到原文件所在目录')
+            gr.Markdown("**输出目录选择**")
+            with gr.Row():
+                tl_btn_output = gr.Button("📁 output", variant="primary")
+                tl_btn_videos = gr.Button("🎬 videos")
+                tl_btn_results = gr.Button("📊 results")
+                tl_btn_refresh = gr.Button("🔄 刷新")
+            tl_dir_dropdown = gr.Dropdown(
+                label='或选择其他目录',
+                choices=get_default_output_dirs(),
+                value='output',
+                allow_custom_value=False
+            )
+            tl_output_dir = gr.State('output')
+            tl_btn_output.click(lambda: ('output', 'output'), outputs=[tl_dir_dropdown, tl_output_dir])
+            tl_btn_videos.click(lambda: ('videos', 'videos'), outputs=[tl_dir_dropdown, tl_output_dir])
+            tl_btn_results.click(lambda: ('results', 'results'), outputs=[tl_dir_dropdown, tl_output_dir])
+            tl_btn_refresh.click(get_default_output_dirs, outputs=tl_dir_dropdown)
+            tl_dir_dropdown.change(lambda x: x, inputs=tl_dir_dropdown, outputs=tl_output_dir)
             tl_lang = gr.Dropdown(['简体中文', '繁体中文', 'English', 'Deutsch', 'Français', 'русский'],
                         label='Target Language', value='简体中文')
             with gr.Row():
@@ -698,8 +762,24 @@ with gr.Blocks(title='YouDub') as app:
                                       file_types=['.wav', '.mp3', '.flac', '.m4a', '.aac'])
             tts_instruments_file = gr.File(label='伴奏音频文件 (audio_instruments.wav)', file_count='single', type='filepath',
                                            file_types=['.wav', '.mp3', '.flac', '.m4a', '.aac'])
-            tts_output_dir = gr.Textbox(label='输出目录', value='output',
-                                    info='处理结果保存目录，留空则默认到原文件所在目录')
+            gr.Markdown("**输出目录选择**")
+            with gr.Row():
+                tts_btn_output = gr.Button("📁 output", variant="primary")
+                tts_btn_videos = gr.Button("🎬 videos")
+                tts_btn_results = gr.Button("📊 results")
+                tts_btn_refresh = gr.Button("🔄 刷新")
+            tts_dir_dropdown = gr.Dropdown(
+                label='或选择其他目录',
+                choices=get_default_output_dirs(),
+                value='output',
+                allow_custom_value=False
+            )
+            tts_output_dir = gr.State('output')
+            tts_btn_output.click(lambda: ('output', 'output'), outputs=[tts_dir_dropdown, tts_output_dir])
+            tts_btn_videos.click(lambda: ('videos', 'videos'), outputs=[tts_dir_dropdown, tts_output_dir])
+            tts_btn_results.click(lambda: ('results', 'results'), outputs=[tts_dir_dropdown, tts_output_dir])
+            tts_btn_refresh.click(get_default_output_dirs, outputs=tts_dir_dropdown)
+            tts_dir_dropdown.change(lambda x: x, inputs=tts_dir_dropdown, outputs=tts_output_dir)
             tts_force_bytedance = gr.Checkbox(label='Force Bytedance', value=False,
                     info='强制使用火山引擎 TTS，而非 IndexTTS 声音克隆')
             with gr.Row():
@@ -719,8 +799,24 @@ with gr.Blocks(title='YouDub') as app:
                                           file_types=['.json'])
             sv_audio_combined_file = gr.File(label='合成音频文件 (audio_combined.wav)', file_count='single', type='filepath',
                                              file_types=['.wav', '.mp3', '.flac', '.m4a', '.aac'])
-            sv_output_dir = gr.Textbox(label='输出目录', value='output',
-                                    info='处理结果保存目录，留空则默认到原文件所在目录')
+            gr.Markdown("**输出目录选择**")
+            with gr.Row():
+                sv_btn_output = gr.Button("📁 output", variant="primary")
+                sv_btn_videos = gr.Button("🎬 videos")
+                sv_btn_results = gr.Button("📊 results")
+                sv_btn_refresh = gr.Button("🔄 刷新")
+            sv_dir_dropdown = gr.Dropdown(
+                label='或选择其他目录',
+                choices=get_default_output_dirs(),
+                value='output',
+                allow_custom_value=False
+            )
+            sv_output_dir = gr.State('output')
+            sv_btn_output.click(lambda: ('output', 'output'), outputs=[sv_dir_dropdown, sv_output_dir])
+            sv_btn_videos.click(lambda: ('videos', 'videos'), outputs=[sv_dir_dropdown, sv_output_dir])
+            sv_btn_results.click(lambda: ('results', 'results'), outputs=[sv_dir_dropdown, sv_output_dir])
+            sv_btn_refresh.click(get_default_output_dirs, outputs=sv_dir_dropdown)
+            sv_dir_dropdown.change(lambda x: x, inputs=sv_dir_dropdown, outputs=sv_output_dir)
             sv_subtitles = gr.Checkbox(label='Subtitles', value=True)
             sv_use_original_audio = gr.Checkbox(label='使用原视频音轨（不配音）', value=False,
                 info='勾选后将跳过 TTS 配音，使用原视频音轨合成。此时无需选择合成音频文件。')
@@ -745,8 +841,24 @@ with gr.Blocks(title='YouDub') as app:
                                    file_types=['.json'])
             gi_thumbnail_file = gr.File(label='缩略图文件 (download.jpg/png)', file_count='single', type='filepath',
                                         file_types=['.jpg', '.jpeg', '.png', '.bmp', '.webp'])
-            gi_output_dir = gr.Textbox(label='输出目录', value='output',
-                                    info='处理结果保存目录，留空则默认到原文件所在目录')
+            gr.Markdown("**输出目录选择**")
+            with gr.Row():
+                gi_btn_output = gr.Button("📁 output", variant="primary")
+                gi_btn_videos = gr.Button("🎬 videos")
+                gi_btn_results = gr.Button("📊 results")
+                gi_btn_refresh = gr.Button("🔄 刷新")
+            gi_dir_dropdown = gr.Dropdown(
+                label='或选择其他目录',
+                choices=get_default_output_dirs(),
+                value='output',
+                allow_custom_value=False
+            )
+            gi_output_dir = gr.State('output')
+            gi_btn_output.click(lambda: ('output', 'output'), outputs=[gi_dir_dropdown, gi_output_dir])
+            gi_btn_videos.click(lambda: ('videos', 'videos'), outputs=[gi_dir_dropdown, gi_output_dir])
+            gi_btn_results.click(lambda: ('results', 'results'), outputs=[gi_dir_dropdown, gi_output_dir])
+            gi_btn_refresh.click(get_default_output_dirs, outputs=gi_dir_dropdown)
+            gi_dir_dropdown.change(lambda x: x, inputs=gi_dir_dropdown, outputs=gi_output_dir)
             with gr.Row():
                 gi_output = gr.Textbox(label='输出', scale=3)
                 gi_output_files = gr.File(label='生成文件', scale=2)
