@@ -35,7 +35,6 @@ from .step000_video_downloader import (
 from .module_registry import (
     get_module,                   # 获取模块元数据
     get_module_ids,               # 获取所有模块 ID
-    resolve_dependencies,         # 依赖解析和拓扑排序
     is_module_completed           # 检查模块是否已完成
 )
 # 模块执行器：执行计划构建、计划验证、默认执行器创建
