@@ -84,7 +84,8 @@ def _check_demucs_model_cached() -> bool:
         yaml_file = remote_dir / "htdemucs_ft.yaml"
         if not yaml_file.exists():
             return False
-        bag = yaml.safe_load(open(yaml_file))
+        with open(yaml_file) as f:
+            bag = yaml.safe_load(f)
         sigs = bag.get("models", bag.get("model", None))
         if sigs is None:
             return False
@@ -167,7 +168,8 @@ def _download_demucs():
     logger.info("Downloading Demucs (htdemucs_ft) model...")
 
     yaml_file = REMOTE_ROOT / "htdemucs_ft.yaml"
-    bag = yaml.safe_load(open(yaml_file, encoding="utf-8"))
+    with open(yaml_file, encoding="utf-8") as f:
+        bag = yaml.safe_load(f)
     signatures = bag.get("models", [])
     if not signatures:
         raise RuntimeError("htdemucs_ft.yaml 中没有找到 models 列表")

@@ -233,7 +233,7 @@ def merge_segments(transcript, ending='!"\').:;?]}~'):
 
     return merged_transcription
 
-def transcribe_audio(folder, model_name: str = 'large', download_root='models/ASR/whisper', device='auto', batch_size=None, diarization=True, min_speakers=None, max_speakers=None):
+def transcribe_audio(folder, model_name: str = 'large', download_root='models/whisper', device='auto', batch_size=None, diarization=True, min_speakers=None, max_speakers=None):
     if batch_size is None:
         batch_size = _get_default_batch_size()
     if os.path.exists(os.path.join(folder, 'transcript.json')):

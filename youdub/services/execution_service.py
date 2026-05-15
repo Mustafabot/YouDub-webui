@@ -11,7 +11,6 @@ class ExecutionService:
 
     def __init__(self):
         self.error_handler = ErrorHandler()
-        self.file_utils = FileUtils()
 
     def _format_output(self, result) -> str:
         """统一格式化模块返回值，确保始终返回 str"""
@@ -38,7 +37,7 @@ class ExecutionService:
                     ["文件夹路径为空"],
                     ["请输入有效的文件夹路径"]
                 )
-            folder = self.file_utils.resolve_folder_path(folder)
+            folder = FileUtils.resolve_folder_path(folder)
             if not os.path.exists(folder):
                 return self.error_handler.format_error(
                     f"文件夹不存在：{folder}",
@@ -79,7 +78,7 @@ class ExecutionService:
         cleanup_function: Optional[Callable] = None,
         **kwargs
     ) -> str:
-        selected_folders = self.file_utils.merge_folder_lists(folder_list_text, folder_select_files)
+        selected_folders = FileUtils.merge_folder_lists(folder_list_text, folder_select_files)
 
         if selected_folders:
             clear_log_buffer()
@@ -125,7 +124,7 @@ class ExecutionService:
                 ["请选择对应的输入文件"]
             ), []
 
-        working_dir_pairs = self.file_utils.prepare_single_input_dirs(file_paths, target_filename, output_dir)
+        working_dir_pairs = FileUtils.prepare_single_input_dirs(file_paths, target_filename, output_dir)
         if not working_dir_pairs:
             return self.error_handler.format_error(
                 "文件准备失败",
@@ -141,7 +140,7 @@ class ExecutionService:
             output_files = []
             for (working_dir, source_dir) in working_dir_pairs:
                 # 将处理产生的输出文件回拷到原始源目录，并收集源目录中的路径
-                copied = self.file_utils.copy_output_files_back(
+                copied = FileUtils.copy_output_files_back(
                     working_dir, source_dir, input_filenames=[target_filename]
                 )
                 output_files.extend(copied)
@@ -188,7 +187,7 @@ class ExecutionService:
 
         # 用户指定输出目录优先
         if output_dir and output_dir.strip():
-            source_dir = self.file_utils.resolve_folder_path(output_dir)
+            source_dir = FileUtils.resolve_folder_path(output_dir)
             os.makedirs(source_dir, exist_ok=True)
             logger.info(f"使用用户指定的输出目录: {source_dir}")
         else:
@@ -207,18 +206,18 @@ class ExecutionService:
                     logger.warning("输入文件跨盘符，输出将回拷到第一个文件所在目录")
                     source_dir = source_paths[0]
 
-        working_dir = self.file_utils.prepare_multi_input_dir(file_map)
+        working_dir = FileUtils.prepare_multi_input_dir(file_map)
 
         clear_log_buffer()
         try:
             result = single_function(working_dir, **kwargs)
             # 将处理产生的输出文件回拷到原始源目录，并收集源目录中的路径
             if source_dir:
-                output_files = self.file_utils.copy_output_files_back(
+                output_files = FileUtils.copy_output_files_back(
                     working_dir, source_dir, input_filenames=list(file_map.keys())
                 )
             else:
-                output_files = self.file_utils.collect_output_files(working_dir)
+                output_files = FileUtils.collect_output_files(working_dir)
             output = self._format_output(result)
             logs = get_log_buffer()
             if logs:

@@ -11,29 +11,32 @@ from scipy.io import wavfile
 from loguru import logger
 
 def sanitize_filename(filename: str) -> str:
-    # Define a set of valid characters
-    valid_chars = "-_.() %s%s" % (string.ascii_letters, string.digits)
-
-    # Keep only valid characters
-    sanitized_filename = ''.join(c for c in filename if c in valid_chars)
-
-    # Replace multiple spaces with a single space
-    sanitized_filename = re.sub(' +', ' ', sanitized_filename)
-
-    return sanitized_filename
+    # 移除 Windows 不允许的文件名字符
+    invalid_chars = r'[<>:"/\\|?*]'
+    sanitized = re.sub(invalid_chars, '', filename)
+    # 移除首尾空格和点
+    sanitized = sanitized.strip(' .')
+    # 多个空格合并为一个
+    sanitized = re.sub(r' +', ' ', sanitized)
+    return sanitized if sanitized else 'untitled'
 
 
 def save_wav(wav: np.ndarray, output_path: str, sample_rate=24000):
-    wav_norm = wav * (32767 / max(0.01, np.max(np.abs(wav))))
+    peak = np.max(np.abs(wav))
+    if peak < 1e-10:
+        wavfile.write(output_path, sample_rate, np.zeros_like(wav, dtype=np.int16))
+        return
+    wav_norm = wav * (32767 / peak)
     wavfile.write(output_path, sample_rate, wav_norm.astype(np.int16))
 
-def save_wav_norm(wav: np.ndarray, output_path: str, sample_rate=24000):
-    wav_norm = wav * (32767 / max(0.01, np.max(np.abs(wav))))
-    wavfile.write(output_path, sample_rate, wav_norm.astype(np.int16))
-    
+
 def normalize_wav(wav_path: str) -> None:
     sample_rate, wav = wavfile.read(wav_path)
-    wav_norm = wav * (32767 / max(0.01, np.max(np.abs(wav))))
+    peak = np.max(np.abs(wav))
+    if peak < 1e-10:
+        wavfile.write(wav_path, sample_rate, np.zeros_like(wav, dtype=np.int16))
+        return
+    wav_norm = wav * (32767 / peak)
     wavfile.write(wav_path, sample_rate, wav_norm.astype(np.int16))
 
 

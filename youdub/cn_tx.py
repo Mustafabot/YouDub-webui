@@ -1195,7 +1195,8 @@ if __name__ == '__main__':
     with open(args.ifile, 'r', encoding='utf8') as istream, open(args.ofile, 'w+', encoding='utf8') as ostream:
         if args.format == 'tsv':
             reader = csv.DictReader(istream, delimiter='\t')
-            assert ('TEXT' in reader.fieldnames)
+            if 'TEXT' not in reader.fieldnames:
+                raise ValueError(f"输入 TSV 文件缺少 'TEXT' 列，实际列名: {reader.fieldnames}")
             print('\t'.join(reader.fieldnames), file=ostream)
 
             for item in reader:

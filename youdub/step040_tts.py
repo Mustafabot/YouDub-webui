@@ -6,7 +6,7 @@ import librosa
 from loguru import logger
 import numpy as np
 
-from .utils import save_wav, save_wav_norm
+from .utils import save_wav
 from .config import get_config, PROJECT_ROOT
 from .step041_tts_bytedance import tts as bytedance_tts
 from .step043_tts_indextts import tts as indextts_tts, INDEXTTS_AVAILABLE
@@ -215,7 +215,7 @@ def generate_wavs(folder, force_bytedance=False):
             full_wav, (0, len_instruments_wav - len_full_wav), mode='constant')
     combined_wav = full_wav + instruments_wav
     # combined_wav /= np.max(np.abs(combined_wav))
-    save_wav_norm(combined_wav, os.path.join(folder, 'audio_combined.wav'))
+    save_wav(combined_wav, os.path.join(folder, 'audio_combined.wav'))
     logger.info(f'Generated {os.path.join(folder, "audio_combined.wav")}')
         
 

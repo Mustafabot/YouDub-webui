@@ -56,7 +56,7 @@ class ErrorHandler:
         return any(kw in msg for kw in ['no such file', 'not found', 'filenotfound', 'does not exist'])
 
     def _is_ffmpeg_error(self, msg: str) -> bool:
-        return 'winerror 2' in msg
+        return 'ffmpeg' in msg.lower() or 'ffprobe' in msg.lower()
 
     def _is_dependency_error(self, msg: str) -> bool:
         return any(kw in msg for kw in ['numba needs numpy', 'numba.*numpy', 'numpy.*numba'])

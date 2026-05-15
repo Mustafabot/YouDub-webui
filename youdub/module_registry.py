@@ -127,13 +127,12 @@ MODULES = {
 
 
 def get_module(module_id):
-    """获取模块信息"""
+    """获取模块信息（返回副本以防止意外修改全局定义）"""
     module = MODULES.get(module_id)
     if module is None:
         return None
-    if module_id == "tts":
-        return _apply_tts_overrides(module)
-    return module
+    result = _apply_tts_overrides(module) if module_id == "tts" else dict(module)
+    return result
 
 
 def get_all_modules():
@@ -201,9 +200,9 @@ def get_module_input_files(module_id):
 
 def get_input_file_producer(filename):
     """根据输入文件名反查产出该文件的模块ID"""
-    for mid, module in MODULES.items():
+    for module in get_all_modules():
         if filename in module.get("output_files", []):
-            return mid
+            return module["id"]
     return None
 
 
@@ -218,9 +217,9 @@ def get_module_dependencies(module_id):
 def get_module_reverse_dependencies(module_id):
     """获取依赖此模块的所有模块（反向依赖）"""
     reverse_deps = []
-    for mid, module in MODULES.items():
+    for module in get_all_modules():
         if module_id in module["dependencies"]:
-            reverse_deps.append(mid)
+            reverse_deps.append(module["id"])
     return reverse_deps
 
 
@@ -266,11 +265,21 @@ def get_module_missing_config(module_id):
 
 
 def resolve_dependencies(selected_modules):
-    """解析选中模块并返回拓扑排序后的列表（不自动添加上游依赖）"""
+    """解析选中模块并返回拓扑排序后的列表（自动包含上游依赖）"""
     if not selected_modules:
         return []
-    resolved = list(selected_modules)
-    return get_execution_order(resolved)
+    expanded = set(selected_modules)
+    changed = True
+    while changed:
+        changed = False
+        for mid in list(expanded):
+            module = get_module(mid)
+            if module:
+                for dep in module["dependencies"]:
+                    if dep not in expanded:
+                        expanded.add(dep)
+                        changed = True
+    return get_execution_order(list(expanded))
 
 
 def get_execution_order(module_ids):

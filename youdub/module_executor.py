@@ -154,6 +154,7 @@ class ModuleExecutor:
                     result = func(folder, **func_params)
                     logger.info(f"[{idx}/{total}] 模块 {module_name} 执行成功")
                     results.append({"module": module_id, "status": "success", "result": result})
+                    failed_predecessor = None
                     break
                 except (KeyboardInterrupt, SystemExit):
                     raise

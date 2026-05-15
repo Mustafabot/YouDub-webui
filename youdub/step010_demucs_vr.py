@@ -143,7 +143,6 @@ def separate_audio(folder: str, model_name: str = "htdemucs_ft", device: str = '
         _separate_audio_chunked(folder, audio_path, duration, model_name, device, progress, shifts, segment, max_chunk_seconds)
 
 def _separate_audio_direct(folder: str, audio_path: str, model_name: str, device: str, progress: bool, shifts: int, segment: int) -> None:
-    load_model(model_name, device, progress, shifts, segment)
     t_start = time.time()
     try:
         origin, separated = separator.separate_audio_file(audio_path)
@@ -194,8 +193,6 @@ def _save_separated_tracks(separated: dict, folder: str) -> None:
 def _separate_audio_chunked(folder: str, audio_path: str, duration: float,
                             model_name: str, device: str, progress: bool, shifts: int, segment: int,
                             max_chunk_seconds: int) -> None:
-    load_model(model_name, device, progress, shifts, segment)
-    
     stride_seconds = max_chunk_seconds
     overlap_seconds = _OVERLAP_SECONDS
     sample_rate = 44100

@@ -110,9 +110,9 @@ def load_embedding_model():
         logger.warning("说话者音色匹配功能将被禁用")
         return False
 
-load_embedding_model()
-
 def generate_embedding(wav_path):
+    if embedding_inference is None:
+        load_embedding_model()
     if embedding_inference is None:
         raise RuntimeError("Embedding model not loaded. Check HF_TOKEN and network connection.")
     embedding = embedding_inference(wav_path)
@@ -182,6 +182,8 @@ def tts(text, output_path, speaker_wav, voice_type=None):
             logger.warning(e)
 
 def get_available_speakers():
+    if embedding_inference is None:
+        load_embedding_model()
     if embedding_inference is None:
         logger.warning("Embedding model not available, skipping speaker download")
         return

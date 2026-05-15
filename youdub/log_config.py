@@ -15,6 +15,7 @@ _log_buffer = deque(maxlen=1000)
 _buffer_lock = threading.Lock()
 
 _INITIALIZED = False
+_init_lock = threading.Lock()
 
 
 def _buffer_sink(message):
@@ -31,9 +32,10 @@ def _buffer_sink(message):
 
 def init_logging():
     global _INITIALIZED
-    if _INITIALIZED:
-        return
-    _INITIALIZED = True
+    with _init_lock:
+        if _INITIALIZED:
+            return
+        _INITIALIZED = True
 
     logger.remove()
 

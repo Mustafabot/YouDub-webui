@@ -362,12 +362,13 @@ def _translate(summary, transcript, target_language='简体中文'):
         text = line['text']
         # history = ''.join(full_translation[:-10])
 
+        translation = None
         retry_message = 'Only translate the quoted sentence and give me the final translation.'
         for retry in range(30):
             messages = fixed_message + \
                 list(history) + [{'role': 'user',
                                   'content': f'使用地道的中文Translate:"{text}"'}]
-            
+
             try:
                 api_params = get_api_params()
                 response = client.chat.completions.create(
@@ -393,8 +394,9 @@ def _translate(summary, transcript, target_language='简体中文'):
                         base_url=get_config('OPENAI_API_BASE', 'https://api.openai.com/v1'),
                         api_key=get_config('OPENAI_API_KEY')
                     )
-                # logger.warning('翻译失败')
                 time.sleep(1)
+        if translation is None:
+            raise RuntimeError(f'翻译行在 30 次重试后仍然失败: {text[:50]}')
         full_translation.append(translation)
         history.append({'role': 'user', 'content': f'Translate:"{text}"'})
         history.append({'role': 'assistant', 'content': f'翻译："{translation}"'})

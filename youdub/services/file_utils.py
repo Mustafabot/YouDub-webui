@@ -138,7 +138,9 @@ class FileUtils:
         """检测路径是否位于系统临时目录"""
         temp_dir = os.path.normcase(os.path.abspath(tempfile.gettempdir()))
         path_norm = os.path.normcase(os.path.abspath(path))
-        return path_norm.startswith(temp_dir)
+        if path_norm == temp_dir:
+            return True
+        return path_norm.startswith(temp_dir + os.sep)
 
     @staticmethod
     def _resolve_output_dir(fpath: str, user_output_dir: Optional[str] = None) -> str:

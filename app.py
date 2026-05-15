@@ -67,6 +67,7 @@ def save_settings(openai_api_key, openai_api_base, model_name, temperature, top_
         "FFMPEG_PATH": ffmpeg_path,
     }
     save_config(config)
+    _refresh_cfg()
     missing = validate_config()
     if missing:
         features = sorted(set(missing.values()))
@@ -189,16 +190,18 @@ def do_everything_wrapper(input_mode, url, local_files, root_folder, num_videos,
         offline_warnings.append("请选择「本地文件」模式或选择已有目录")
         offline_warnings.append("")
     cfg = load_config()
-    if not cfg.get('OPENAI_API_KEY'):
-        return _error_handler.format_error(
-            "缺少 OpenAI API Key",
-            ["翻译功能需要 OpenAI API Key 才能运行", "API Key 未在设置页面中配置"],
-            ["前往设置页面填写 OpenAI API Key", "获取 API Key：https://platform.openai.com/api-keys"]
-        )
-    
+
     modules_param = None
     if use_module_selection and selected_modules and len(selected_modules) > 0:
         modules_param = selected_modules
+
+    if not cfg.get('OPENAI_API_KEY'):
+        if modules_param is None or 'translation' in modules_param:
+            return _error_handler.format_error(
+                "缺少 OpenAI API Key",
+                ["翻译功能需要 OpenAI API Key 才能运行", "API Key 未在设置页面中配置"],
+                ["前往设置页面填写 OpenAI API Key", "获取 API Key：https://platform.openai.com/api-keys"]
+            )
     
     clear_log_buffer()
     try:
@@ -234,7 +237,7 @@ def do_everything_wrapper(input_mode, url, local_files, root_folder, num_videos,
             selected_files=selected_files,
             selected_folders=selected_folders if selected_folders else None
         )
-        output = f"✅ {result}" if result and not str(result).startswith("❌") else result
+        output = f"✅ {result}" if result and not str(result).startswith("✅") and not str(result).startswith("❌") else result
         if offline_warnings:
             output = "\n".join(offline_warnings) + output
         logs = get_log_buffer()
@@ -295,7 +298,13 @@ def synthesize_wrapper(video_file, translation_file, audio_combined_file, output
     )
 
 
-_cfg = load_config()
+_cfg = {}
+
+def _refresh_cfg():
+    global _cfg
+    _cfg = load_config()
+
+_refresh_cfg()
 
 RESOLUTION_CHOICES = ['1080p', '720p', '480p']
 

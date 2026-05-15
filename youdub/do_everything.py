@@ -54,8 +54,8 @@ def process_video_with_modules(info, root_folder, params, selected_modules=None,
         folder = download_single_video(info, root_folder, params.get("resolution", "1080p"))
         if folder is None:
             logger.warning(f"Failed to download video {info['title']}")
-            return True
-    
+            return False
+
     return process_folder_with_modules(folder, params, selected_modules, skip_completed, selected_files)
 
 
@@ -144,8 +144,8 @@ def process_video(info, root_folder, resolution, demucs_model, device, shifts, w
                 folder = download_single_video(info, root_folder, resolution)
                 if folder is None:
                     logger.warning(f"Failed to download video {info['title']}")
-                    return True
-            
+                    return False
+
             logger.info(f"Process video in {folder}")
             
             from .step010_demucs_vr import separate_all_audio_under_folder, cleanup_demucs
