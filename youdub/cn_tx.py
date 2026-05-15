@@ -1,59 +1,108 @@
 #!/usr/bin/env python3
-# coding=utf-8
+# -*- coding: utf-8 -*-
+"""
+中文文本规范化工具（Chinese Text Normalization）
 
-# Authors:
-#   2019.5 Zhiyang Zhou (https://github.com/Joee1995/chn_text_norm.git)
-#   2019.9 - 2022 Jiayu DU
-#
-# requirements:
-#   - python 3.X
-# notes: python 2.X WILL fail or produce misleading results
+将中文文本中的数字、日期、货币、电话号码、分数、百分数等非标准写法（NSW,
+Non-Standard Word）转换为标准中文读音格式。主要用于 TTS（文本转语音）系统
+的前端文本处理，确保输入文本能被正确朗读。
 
-import sys
-import os
-import argparse
-import string
-from loguru import logger
-import re
-import csv
+核心功能：
+  - 数字转中文读音（支持简繁、大写、小写多种形式）
+  - 日期规范化（年月日转换为中文读音）
+  - 货币金额规范化
+  - 电话号码规范化（手机号、固话）
+  - 分数、百分数规范化
+  - 量词规范化
+  - 去除儿化音
+  - 全角半角转换
+  - 繁简体转换
+  - 非法字符检测
 
-# ================================================================================ #
-#                                    basic constant
-# ================================================================================ #
+作者：
+  2019.5 Zhiyang Zhou (https://github.com/Joee1995/chn_text_norm.git)
+  2019.9 - 2022 Jiayu DU
+
+使用方式：
+  python cn_tx.py [options] input_file output_file
+
+依赖：
+  - python 3.X
+  - opencc（可选，繁简体转换时需要）
+  - loguru（日志记录）
+
+注意：python 2.X 将运行失败或产生错误结果
+"""
+
+# ============================================================================ #
+# 标准库和第三方库导入
+# ============================================================================ #
+import sys        # 系统相关，用于命令行参数和标准输出
+import os         # 操作系统接口，用于文件路径
+import argparse   # 命令行参数解析
+import string     # 字符串常量，如标点符号
+from loguru import logger  # loguru 日志库
+import re         # 正则表达式，用于模式匹配和替换
+import csv        # CSV 文件读写，支持 TSV 格式输入
+
+# ============================================================================ #
+# 中文数字系统基础常量定义
+# ============================================================================ #
+# 小写数字（简体）
 CHINESE_DIGIS = u'零一二三四五六七八九'
+# 大写数字（简体，用于财务/正式场合）
 BIG_CHINESE_DIGIS_SIMPLIFIED = u'零壹贰叁肆伍陆柒捌玖'
+# 大写数字（繁体）
 BIG_CHINESE_DIGIS_TRADITIONAL = u'零壹貳參肆伍陸柒捌玖'
+
+# 小位数单位（简体，十、百、千、万）
 SMALLER_BIG_CHINESE_UNITS_SIMPLIFIED = u'十百千万'
+# 小位数单位（繁体，拾、佰、仟、萬）
 SMALLER_BIG_CHINESE_UNITS_TRADITIONAL = u'拾佰仟萬'
+
+# 大位数单位（简体，亿、兆、京、垓等）
 LARGER_CHINESE_NUMERING_UNITS_SIMPLIFIED = u'亿兆京垓秭穰沟涧正载'
+# 大位数单位（繁体，億、兆、京、垓等）
 LARGER_CHINESE_NUMERING_UNITS_TRADITIONAL = u'億兆京垓秭穰溝澗正載'
+# 小位数单位别名（简体，与上面相同，用于不同场景）
 SMALLER_CHINESE_NUMERING_UNITS_SIMPLIFIED = u'十百千万'
+# 小位数单位别名（繁体）
 SMALLER_CHINESE_NUMERING_UNITS_TRADITIONAL = u'拾佰仟萬'
 
-ZERO_ALT = u'〇'
-ONE_ALT = u'幺'
-TWO_ALTS = [u'两', u'兩']
+# 数字替代写法
+ZERO_ALT = u'〇'         # 零的替代写法（用于年份，如"二〇二〇年"）
+ONE_ALT = u'幺'          # 一的替代写法（用于电话号码，如"幺幺零"）
+TWO_ALTS = [u'两', u'兩']  # 二的替代写法（简体/繁体"两"，用于量词前）
 
-POSITIVE = [u'正', u'正']
-NEGATIVE = [u'负', u'負']
-POINT = [u'点', u'點']
-# PLUS = [u'加', u'加']
-# SIL = [u'杠', u'槓']
+# 符号常量
+POSITIVE = [u'正', u'正']     # 正号（简体/繁体）
+NEGATIVE = [u'负', u'負']     # 负号（简体/繁体）
+POINT = [u'点', u'點']        # 小数点（简体/繁体）
 
+# 填充词（语气词、停顿词等，在语音合成中通常需要去除）
 FILLER_CHARS = ['呃', '啊']
 
+# 儿化音白名单正则表达式
+# 这些词中的"儿"是合法组成部分，不能被去除
+# 例如：女儿、儿子、儿童、婴儿等
 ER_WHITELIST = '(儿女|儿子|儿孙|女儿|儿媳|妻儿|' \
     '胎儿|婴儿|新生儿|婴幼儿|幼儿|少儿|小儿|儿歌|儿童|儿科|托儿所|孤儿|' \
     '儿戏|儿化|台儿庄|鹿儿岛|正儿八经|吊儿郎当|生儿育女|托儿带女|养儿防老|痴儿呆女|' \
     '佳儿佳妇|儿怜兽扰|儿无常父|儿不嫌母丑|儿行千里母担忧|儿大不由爷|苏乞儿)'
 ER_WHITELIST_PATTERN = re.compile(ER_WHITELIST)
 
-# 中文数字系统类型
+# 中文数字系统类型枚举
+# low:  '兆' = '亿' * '十' = 1e9
+# mid:  '兆' = '亿' * '万' = 1e12
+# high: '兆' = '亿' * '亿' = 1e16
 NUMBERING_TYPES = ['low', 'mid', 'high']
 
+# 货币名称（支持的主要货币类型）
 CURRENCY_NAMES = '(人民币|美元|日元|英镑|欧元|马克|法郎|加拿大元|澳元|港币|先令|芬兰马克|爱尔兰镑|' \
                  '里拉|荷兰盾|埃斯库多|比塞塔|印尼盾|林吉特|新西兰元|比索|卢布|新加坡元|韩元|泰铢)'
+# 货币单位（元、块、角、毛、分等，含数位修饰）
 CURRENCY_UNITS = '((亿|千万|百万|万|千|百)|(亿|千万|百万|万|千|百|)元|(亿|千万|百万|万|千|百|)块|角|毛|分)'
+# 常用量词（个、只、条、张、把、次等）
 COM_QUANTIFIERS = '(匹|张|座|回|场|尾|条|个|首|阙|阵|网|炮|顶|丘|棵|只|支|袭|辆|挑|担|颗|壳|窠|曲|墙|群|腔|' \
                   '砣|座|客|贯|扎|捆|刀|令|打|手|罗|坡|山|岭|江|溪|钟|队|单|双|对|出|口|头|脚|板|跳|枝|件|贴|' \
                   '针|线|管|名|位|身|堂|课|本|页|家|户|层|丝|毫|厘|分|钱|两|斤|担|铢|石|钧|锱|忽|(千|毫|微)克|' \
@@ -62,120 +111,133 @@ COM_QUANTIFIERS = '(匹|张|座|回|场|尾|条|个|首|阙|阵|网|炮|顶|丘|
                   '纪|岁|世|更|夜|春|夏|秋|冬|代|伏|辈|丸|泡|粒|颗|幢|堆|条|根|支|道|面|片|张|颗|块)'
 
 
-# Punctuation information are based on Zhon project (https://github.com/tsroten/zhon.git)
-CN_PUNCS_STOP = '！？｡。'
+# ============================================================================ #
+# 中文标点符号常量
+# 基于 Zhon 项目 (https://github.com/tsroten/zhon.git)
+# ============================================================================ #
+CN_PUNCS_STOP = '！？｡。'                    # 中文句末标点（停顿/结束）
 CN_PUNCS_NONSTOP = '＂＃＄％＆＇（）＊＋，－／：；＜＝＞＠［＼］＾＿｀｛｜｝～｟｠｢｣､、〃《》「」『』【】〔〕〖〗〘〙〚〛〜〝〞〟〰〾〿–—‘’‛“”„‟…‧﹏·〈〉-'
-CN_PUNCS = CN_PUNCS_STOP + CN_PUNCS_NONSTOP
+CN_PUNCS = CN_PUNCS_STOP + CN_PUNCS_NONSTOP  # 全量中文标点
 
+# 中英文标点合集
 PUNCS = CN_PUNCS + string.punctuation
+# 标点符号转换表：将标点替换为空格
 PUNCS_TRANSFORM = str.maketrans(
-    PUNCS, ' ' * len(PUNCS), '')  # replace puncs with space
+    PUNCS, ' ' * len(PUNCS), '')  # 将每个标点映射到空格
 
 
-# https://zh.wikipedia.org/wiki/全行和半行
+# ============================================================================ #
+# 全角字符到半角字符的转换映射表
+# 参考：https://zh.wikipedia.org/wiki/全行和半行
+# ============================================================================ #
 QJ2BJ = {
-    '　': ' ',
-    '！': '!',
-    '＂': '"',
-    '＃': '#',
-    '＄': '$',
-    '％': '%',
-    '＆': '&',
-    '＇': "'",
-    '（': '(',
-    '）': ')',
-    '＊': '*',
-    '＋': '+',
-    '，': ',',
-    '－': '-',
-    '．': '.',
-    '／': '/',
-    '０': '0',
-    '１': '1',
-    '２': '2',
-    '３': '3',
-    '４': '4',
-    '５': '5',
-    '６': '6',
-    '７': '7',
-    '８': '8',
-    '９': '9',
-    '：': ':',
-    '；': ';',
-    '＜': '<',
-    '＝': '=',
-    '＞': '>',
-    '？': '?',
-    '＠': '@',
-    'Ａ': 'A',
-    'Ｂ': 'B',
-    'Ｃ': 'C',
-    'Ｄ': 'D',
-    'Ｅ': 'E',
-    'Ｆ': 'F',
-    'Ｇ': 'G',
-    'Ｈ': 'H',
-    'Ｉ': 'I',
-    'Ｊ': 'J',
-    'Ｋ': 'K',
-    'Ｌ': 'L',
-    'Ｍ': 'M',
-    'Ｎ': 'N',
-    'Ｏ': 'O',
-    'Ｐ': 'P',
-    'Ｑ': 'Q',
-    'Ｒ': 'R',
-    'Ｓ': 'S',
-    'Ｔ': 'T',
-    'Ｕ': 'U',
-    'Ｖ': 'V',
-    'Ｗ': 'W',
-    'Ｘ': 'X',
-    'Ｙ': 'Y',
-    'Ｚ': 'Z',
-    '［': '[',
-    '＼': '\\',
-    '］': ']',
-    '＾': '^',
-    '＿': '_',
-    '｀': '`',
-    'ａ': 'a',
-    'ｂ': 'b',
-    'ｃ': 'c',
-    'ｄ': 'd',
-    'ｅ': 'e',
-    'ｆ': 'f',
-    'ｇ': 'g',
-    'ｈ': 'h',
-    'ｉ': 'i',
-    'ｊ': 'j',
-    'ｋ': 'k',
-    'ｌ': 'l',
-    'ｍ': 'm',
-    'ｎ': 'n',
-    'ｏ': 'o',
-    'ｐ': 'p',
-    'ｑ': 'q',
-    'ｒ': 'r',
-    'ｓ': 's',
-    'ｔ': 't',
-    'ｕ': 'u',
-    'ｖ': 'v',
-    'ｗ': 'w',
-    'ｘ': 'x',
-    'ｙ': 'y',
-    'ｚ': 'z',
-    '｛': '{',
-    '｜': '|',
-    '｝': '}',
-    '～': '~',
+    '　': ' ',   # 全角空格
+    '！': '!',   # 全角感叹号
+    '＂': '"',   # 全角双引号
+    '＃': '#',   # 全角井号
+    '＄': '$',   # 全角美元符号
+    '％': '%',   # 全角百分号
+    '＆': '&',   # 全角与符号
+    '＇': "'",   # 全角单引号
+    '（': '(',   # 全角左括号
+    '）': ')',   # 全角右括号
+    '＊': '*',   # 全角星号
+    '＋': '+',   # 全角加号
+    '，': ',',   # 全角逗号
+    '－': '-',   # 全角减号/连接线
+    '．': '.',   # 全角句点
+    '／': '/',   # 全角斜线
+    '０': '0',   # 全角数字 0
+    '１': '1',   # 全角数字 1
+    '２': '2',   # 全角数字 2
+    '３': '3',   # 全角数字 3
+    '４': '4',   # 全角数字 4
+    '５': '5',   # 全角数字 5
+    '６': '6',   # 全角数字 6
+    '７': '7',   # 全角数字 7
+    '８': '8',   # 全角数字 8
+    '９': '9',   # 全角数字 9
+    '：': ':',   # 全角冒号
+    '；': ';',   # 全角分号
+    '＜': '<',   # 全角小于号
+    '＝': '=',   # 全角等号
+    '＞': '>',   # 全角大于号
+    '？': '?',   # 全角问号
+    '＠': '@',   # 全角 at 符号
+    'Ａ': 'A',   # 全角大写 A
+    'Ｂ': 'B',   # 全角大写 B
+    'Ｃ': 'C',   # 全角大写 C
+    'Ｄ': 'D',   # 全角大写 D
+    'Ｅ': 'E',   # 全角大写 E
+    'Ｆ': 'F',   # 全角大写 F
+    'Ｇ': 'G',   # 全角大写 G
+    'Ｈ': 'H',   # 全角大写 H
+    'Ｉ': 'I',   # 全角大写 I
+    'Ｊ': 'J',   # 全角大写 J
+    'Ｋ': 'K',   # 全角大写 K
+    'Ｌ': 'L',   # 全角大写 L
+    'Ｍ': 'M',   # 全角大写 M
+    'Ｎ': 'N',   # 全角大写 N
+    'Ｏ': 'O',   # 全角大写 O
+    'Ｐ': 'P',   # 全角大写 P
+    'Ｑ': 'Q',   # 全角大写 Q
+    'Ｒ': 'R',   # 全角大写 R
+    'Ｓ': 'S',   # 全角大写 S
+    'Ｔ': 'T',   # 全角大写 T
+    'Ｕ': 'U',   # 全角大写 U
+    'Ｖ': 'V',   # 全角大写 V
+    'Ｗ': 'W',   # 全角大写 W
+    'Ｘ': 'X',   # 全角大写 X
+    'Ｙ': 'Y',   # 全角大写 Y
+    'Ｚ': 'Z',   # 全角大写 Z
+    '［': '[',   # 全角左中括号
+    '＼': '\\',  # 全角反斜线
+    '］': ']',   # 全角右中括号
+    '＾': '^',   # 全角脱字符
+    '＿': '_',   # 全角下划线
+    '｀': '`',   # 全角反引号
+    'ａ': 'a',   # 全角小写 a
+    'ｂ': 'b',   # 全角小写 b
+    'ｃ': 'c',   # 全角小写 c
+    'ｄ': 'd',   # 全角小写 d
+    'ｅ': 'e',   # 全角小写 e
+    'ｆ': 'f',   # 全角小写 f
+    'ｇ': 'g',   # 全角小写 g
+    'ｈ': 'h',   # 全角小写 h
+    'ｉ': 'i',   # 全角小写 i
+    'ｊ': 'j',   # 全角小写 j
+    'ｋ': 'k',   # 全角小写 k
+    'ｌ': 'l',   # 全角小写 l
+    'ｍ': 'm',   # 全角小写 m
+    'ｎ': 'n',   # 全角小写 n
+    'ｏ': 'o',   # 全角小写 o
+    'ｐ': 'p',   # 全角小写 p
+    'ｑ': 'q',   # 全角小写 q
+    'ｒ': 'r',   # 全角小写 r
+    'ｓ': 's',   # 全角小写 s
+    'ｔ': 't',   # 全角小写 t
+    'ｕ': 'u',   # 全角小写 u
+    'ｖ': 'v',   # 全角小写 v
+    'ｗ': 'w',   # 全角小写 w
+    'ｘ': 'x',   # 全角小写 x
+    'ｙ': 'y',   # 全角小写 y
+    'ｚ': 'z',   # 全角小写 z
+    '｛': '{',   # 全角左大括号
+    '｜': '|',   # 全角竖线
+    '｝': '}',   # 全角右大括号
+    '～': '~',   # 全角波浪号
 }
+# 创建全角到半角的转换表（用于 str.translate）
 QJ2BJ_TRANSFORM = str.maketrans(
     ''.join(QJ2BJ.keys()), ''.join(QJ2BJ.values()), '')
 
 
-# 2013 China National Standard: https://zh.wikipedia.org/wiki/通用规范汉字表, raw resources:
-#   https://github.com/mozillazg/pinyin-data/blob/master/kMandarin_8105.txt with 8105 chinese chars in total
+# ============================================================================ #
+# 中文字符集常量
+# 来源：2013 年中国国家标准《通用规范汉字表》
+# 原始资源：https://github.com/mozillazg/pinyin-data/blob/master/kMandarin_8105.txt
+# 共 8105 个规范汉字
+# ============================================================================ #
 CN_CHARS_COMMON = (
     '一丁七万丈三上下不与丏丐丑专且丕世丘丙业丛东丝丞丢两严丧个丫中丰串临丸丹为主丽举'
     '乂乃久么义之乌乍乎乏乐乒乓乔乖乘乙乜九乞也习乡书乩买乱乳乸乾了予争事二亍于亏云互'
@@ -337,7 +399,7 @@ CN_CHARS_COMMON = (
     '谢谣谤谥谦谧谨谩谪谫谬谭谮谯谰谱谲谳谴谵谶谷谼谿豁豆豇豉豌豕豚象豢豨豪豫豮豳豸豹'
     '豺貂貅貆貉貊貌貔貘贝贞负贡财责贤败账货质贩贪贫贬购贮贯贰贱贲贳贴贵贶贷贸费贺贻贼'
     '贽贾贿赀赁赂赃资赅赆赇赈赉赊赋赌赍赎赏赐赑赒赓赔赕赖赗赘赙赚赛赜赝赞赟赠赡赢赣赤'
-    '赦赧赪赫赭走赳赴赵赶起趁趄超越趋趑趔趟趣趯趱足趴趵趸趺趼趾趿跂跃跄跆跋跌跎跏跐跑'
+    '赦赧赪赫赭走赳赴赵赶起趁趄超越趋趑趔趟趣趯趱足趴趵趸趺趼趾趿跂跃跄跆跋跌跎跏蹐跑'
     '跖跗跚跛距跞跟跣跤跨跪跬路跱跳践跶跷跸跹跺跻跽踅踉踊踌踏踒踔踝踞踟踢踣踦踩踪踬踮'
     '踯踱踵踶踹踺踽蹀蹁蹂蹄蹅蹇蹈蹉蹊蹋蹐蹑蹒蹙蹚蹜蹢蹦蹩蹬蹭蹯蹰蹲蹴蹶蹼蹽蹾蹿躁躅躇'
     '躏躐躔躜躞身躬躯躲躺车轧轨轩轪轫转轭轮软轰轱轲轳轴轵轶轷轸轹轺轻轼载轾轿辀辁辂较'
@@ -381,71 +443,131 @@ CN_CHARS_COMMON = (
     '𬟁𬟽𬣙𬣞𬣡𬣳𬤇𬤊𬤝𬨂𬨎𬩽𬪩𬬩𬬭𬬮𬬱𬬸𬬹𬬻𬬿𬭁𬭊𬭎𬭚𬭛𬭤𬭩𬭬𬭯𬭳𬭶𬭸𬭼𬮱𬮿𬯀𬯎𬱖𬱟'
     '𬳵𬳶𬳽𬳿𬴂𬴃𬴊𬶋𬶍𬶏𬶐𬶟𬶠𬶨𬶭𬶮𬷕𬸘𬸚𬸣𬸦𬸪𬹼𬺈𬺓'
 )
-CN_CHARS_EXT = '吶诶屌囧飚屄'
+CN_CHARS_EXT = '吶诶屌囧飚屄'  # 扩展中文字符集（网络用语等）
 
-CN_CHARS = CN_CHARS_COMMON + CN_CHARS_EXT
+CN_CHARS = CN_CHARS_COMMON + CN_CHARS_EXT  # 完整中文字符集
+# 中文字符快速查找字典
 IN_CH_CHARS = {c: True for c in CN_CHARS}
 
+# 英文字母和数字字符集
 EN_CHARS = string.ascii_letters + string.digits
+# 英文字符快速查找字典
 IN_EN_CHARS = {c: True for c in EN_CHARS}
 
+# 有效字符集（中文 + 英文 + 空格 + 标点）
 VALID_CHARS = CN_CHARS + EN_CHARS + ' ' + PUNCS
+# 有效字符快速查找字典
 IN_VALID_CHARS = {c: True for c in VALID_CHARS}
 
-# ================================================================================ #
-#                                    basic class
-# ================================================================================ #
 
+# ============================================================================ #
+# 基础类定义
+# 中文数字系统的核心抽象类
+# ============================================================================ #
 
 class ChineseChar(object):
     """
-    中文字符
-    每个字符对应简体和繁体,
-    e.g. 简体 = '负', 繁体 = '負'
-    转换时可转换为简体或繁体
+    中文字符基类
+
+    每个 ChineseChar 对象对应一个中文字符，同时包含简体字和繁体字两种形式。
+    在转换时可以根据需要输出简体或繁体的字符串表示。
+
+    属性:
+        simplified (str): 简体中文字符
+        traditional (str): 繁体中文字符
     """
 
     def __init__(self, simplified, traditional):
+        """
+        初始化 ChineseChar 实例
+
+        参数:
+            simplified (str): 简体字
+            traditional (str): 繁体字
+        """
         self.simplified = simplified
         self.traditional = traditional
-        # self.__repr__ = self.__str__
 
     def __str__(self):
+        """
+        返回字符串表示（优先返回简体，其次繁体）
+
+        返回:
+            str: 中文字符或 None
+        """
         return self.simplified or self.traditional or None
 
     def __repr__(self):
+        """返回正式的字符串表示（与 __str__ 相同）"""
         return self.__str__()
 
 
 class ChineseNumberUnit(ChineseChar):
     """
-    中文数字/数位字符
-    每个字符除繁简体外还有一个额外的大写字符
-    e.g. '陆' 和 '陸'
+    中文数位/单位字符类（如：十、百、千、万、亿等）
+
+    继承自 ChineseChar，除了简体/繁体外，还包含幂指数和大写形式。
+    power 属性表示该数位对应的 10 的幂指数。
+
+    属性:
+        power (int): 数位的幂指数，如 十=1, 百=2, 千=3, 万=4
+        big_s (str): 简体大写形式（如：拾、佰、仟）
+        big_t (str): 繁体大写形式（如：拾、佰、仟）
     """
 
     def __init__(self, power, simplified, traditional, big_s, big_t):
+        """
+        初始化 ChineseNumberUnit 实例
+
+        参数:
+            power (int): 10 的幂指数
+            simplified (str): 简体字
+            traditional (str): 繁体字
+            big_s (str): 简体大写形式
+            big_t (str): 繁体大写形式
+        """
         super(ChineseNumberUnit, self).__init__(simplified, traditional)
         self.power = power
         self.big_s = big_s
         self.big_t = big_t
 
     def __str__(self):
+        """返回 10^power 形式的字符串表示"""
         return '10^{}'.format(self.power)
 
     @classmethod
     def create(cls, index, value, numbering_type=NUMBERING_TYPES[1], small_unit=False):
+        """
+        工厂方法：根据索引和数字系统类型创建数位实例
 
+        不同的数字系统类型（low/mid/high）决定了大数位的幂指数计算方式：
+          - low:  '兆' = '亿' * '十' = 1e9
+          - mid:  '兆' = '亿' * '万' = 1e12
+          - high: '兆' = '亿' * '亿' = 1e16
+
+        参数:
+            index (int): 在数位列表中的索引
+            value (tuple): 包含 (简体, 繁体) 的字符串元组
+            numbering_type (str): 数字系统类型，'low'、'mid' 或 'high'
+            small_unit (bool): 是否为小单位（十、百、千、万）
+
+        返回:
+            ChineseNumberUnit: 创建好的数位实例
+        """
         if small_unit:
+            # 小单位：十、百、千、万，幂指数为 index + 1
             return ChineseNumberUnit(power=index + 1,
                                      simplified=value[0], traditional=value[1], big_s=value[1], big_t=value[1])
         elif numbering_type == NUMBERING_TYPES[0]:
+            # low 类型：幂指数 = index + 8
             return ChineseNumberUnit(power=index + 8,
                                      simplified=value[0], traditional=value[1], big_s=value[0], big_t=value[1])
         elif numbering_type == NUMBERING_TYPES[1]:
+            # mid 类型：幂指数 = (index + 2) * 4
             return ChineseNumberUnit(power=(index + 2) * 4,
                                      simplified=value[0], traditional=value[1], big_s=value[0], big_t=value[1])
         elif numbering_type == NUMBERING_TYPES[2]:
+            # high 类型：幂指数 = 2^(index + 3)
             return ChineseNumberUnit(power=pow(2, index + 3),
                                      simplified=value[0], traditional=value[1], big_s=value[0], big_t=value[1])
         else:
@@ -455,10 +577,33 @@ class ChineseNumberUnit(ChineseChar):
 
 class ChineseNumberDigit(ChineseChar):
     """
-    中文数字字符
+    中文数字字符类（如：零、一、二、三、四等）
+
+    继承自 ChineseChar，包含数字的数值、大写形式和替代写法。
+    替代写法用于特殊场景，如：零可写作"〇"（年份），一可写作"幺"（电话号码），
+    二可写作"两"（量词前）。
+
+    属性:
+        value (int): 数字的数值（0-9）
+        big_s (str): 简体大写形式
+        big_t (str): 繁体大写形式
+        alt_s (str): 简体替代写法
+        alt_t (str): 繁体替代写法
     """
 
     def __init__(self, value, simplified, traditional, big_s, big_t, alt_s=None, alt_t=None):
+        """
+        初始化 ChineseNumberDigit 实例
+
+        参数:
+            value (int): 数字值
+            simplified (str): 简体字
+            traditional (str): 繁体字
+            big_s (str): 简体大写形式
+            big_t (str): 繁体大写形式
+            alt_s (str, optional): 简体替代写法
+            alt_t (str, optional): 繁体替代写法
+        """
         super(ChineseNumberDigit, self).__init__(simplified, traditional)
         self.value = value
         self.big_s = big_s
@@ -467,149 +612,246 @@ class ChineseNumberDigit(ChineseChar):
         self.alt_t = alt_t
 
     def __str__(self):
+        """返回数字值的字符串表示"""
         return str(self.value)
 
     @classmethod
     def create(cls, i, v):
+        """
+        工厂方法：创建中文数字字符实例
+
+        参数:
+            i (int): 数字值（0-9）
+            v (tuple): 包含 (简体, 繁体, 大写简体, 大写繁体) 的元组
+
+        返回:
+            ChineseNumberDigit: 创建好的数字字符实例
+        """
         return ChineseNumberDigit(i, v[0], v[1], v[2], v[3])
 
 
 class ChineseMath(ChineseChar):
     """
-    中文数位字符
+    中文数学符号类（如：正、负、点）
+
+    用于表示数字系统中的数学符号，包含符号标识和计算表达式。
+
+    属性:
+        symbol (str): 数学符号（如 '+', '-', '.')
+        expression (function): 对应的计算函数
     """
 
     def __init__(self, simplified, traditional, symbol, expression=None):
+        """
+        初始化 ChineseMath 实例
+
+        参数:
+            simplified (str): 简体字
+            traditional (str): 繁体字
+            symbol (str): 数学符号
+            expression (function, optional): 计算函数
+        """
         super(ChineseMath, self).__init__(simplified, traditional)
         self.symbol = symbol
         self.expression = expression
+        # 数学符号的大写形式就是其本身
         self.big_s = simplified
         self.big_t = traditional
 
 
+# 类别名：简化类名引用
 CC, CNU, CND, CM = ChineseChar, ChineseNumberUnit, ChineseNumberDigit, ChineseMath
 
 
 class NumberSystem(object):
     """
-    中文数字系统
+    中文数字系统类
+
+    包含所有数位单位、数字字符和数学符号的完整数字系统。
+    不同的数字系统类型（low/mid/high）影响大数位的幂指数计算。
     """
     pass
 
 
 class MathSymbol(object):
     """
-    用于中文数字系统的数学符号 (繁/简体), e.g.
-    positive = ['正', '正']
-    negative = ['负', '負']
-    point = ['点', '點']
+    数学符号容器类
+
+    用于组织中文数字系统中的数学符号（正、负、小数点）。
+
+    属性:
+        positive (ChineseMath): 正号
+        negative (ChineseMath): 负号
+        point (ChineseMath): 小数点
     """
 
     def __init__(self, positive, negative, point):
+        """
+        初始化 MathSymbol 实例
+
+        参数:
+            positive (ChineseMath): 正号对象
+            negative (ChineseMath): 负号对象
+            point (ChineseMath): 小数点对象
+        """
         self.positive = positive
         self.negative = negative
         self.point = point
 
     def __iter__(self):
+        """迭代所有数学符号"""
         for v in self.__dict__.values():
             yield v
 
 
-# class OtherSymbol(object):
-#     """
-#     其他符号
-#     """
-#
-#     def __init__(self, sil):
-#         self.sil = sil
-#
-#     def __iter__(self):
-#         for v in self.__dict__.values():
-#             yield v
+# ============================================================================ #
+# 核心工具函数：数字系统创建与数字转换
+# ============================================================================ #
 
-
-# ================================================================================ #
-#                                    basic utils
-# ================================================================================ #
 def create_system(numbering_type=NUMBERING_TYPES[1]):
     """
-    根据数字系统类型返回创建相应的数字系统，默认为 mid
-    NUMBERING_TYPES = ['low', 'mid', 'high']: 中文数字系统类型
-        low:  '兆' = '亿' * '十' = $10^{9}$,  '京' = '兆' * '十', etc.
-        mid:  '兆' = '亿' * '万' = $10^{12}$, '京' = '兆' * '万', etc.
-        high: '兆' = '亿' * '亿' = $10^{16}$, '京' = '兆' * '兆', etc.
-    返回对应的数字系统
-    """
+    根据数字系统类型创建完整的数字系统
 
-    # chinese number units of '亿' and larger
+    构建包括所有数位单位、数字字符和数学符号的完整数字系统。
+    不同类型（low/mid/high）影响大数位（亿以上）的幂指数计算方式。
+
+    参数:
+        numbering_type (str): 数字系统类型，默认为 'mid'
+            NUMBERING_TYPES = ['low', 'mid', 'high']
+            - low:  '兆' = '亿' * '十' = 10^9,  '京' = '兆' * '十', 以此类推
+            - mid:  '兆' = '亿' * '万' = 10^12, '京' = '兆' * '万', 以此类推
+            - high: '兆' = '亿' * '亿' = 10^16, '京' = '兆' * '兆', 以此类推
+
+    返回:
+        NumberSystem: 完整的数字系统对象
+    """
+    # 构建大数位单位（亿、兆、京、垓等）
+    # 将简体和繁体版本合并成元组列表
     all_larger_units = zip(
         LARGER_CHINESE_NUMERING_UNITS_SIMPLIFIED, LARGER_CHINESE_NUMERING_UNITS_TRADITIONAL)
     larger_units = [CNU.create(i, v, numbering_type, False)
                     for i, v in enumerate(all_larger_units)]
-    # chinese number units of '十, 百, 千, 万'
+
+    # 构建小数位单位（十、百、千、万）
     all_smaller_units = zip(
         SMALLER_CHINESE_NUMERING_UNITS_SIMPLIFIED, SMALLER_CHINESE_NUMERING_UNITS_TRADITIONAL)
     smaller_units = [CNU.create(i, v, small_unit=True)
                      for i, v in enumerate(all_smaller_units)]
-    # digis
+
+    # 构建数字字符（零到九）
     chinese_digis = zip(CHINESE_DIGIS, CHINESE_DIGIS,
                         BIG_CHINESE_DIGIS_SIMPLIFIED, BIG_CHINESE_DIGIS_TRADITIONAL)
     digits = [CND.create(i, v) for i, v in enumerate(chinese_digis)]
-    digits[0].alt_s, digits[0].alt_t = ZERO_ALT, ZERO_ALT
-    digits[1].alt_s, digits[1].alt_t = ONE_ALT, ONE_ALT
-    digits[2].alt_s, digits[2].alt_t = TWO_ALTS[0], TWO_ALTS[1]
+    # 设置特殊替代写法
+    digits[0].alt_s, digits[0].alt_t = ZERO_ALT, ZERO_ALT      # 零 -> 〇
+    digits[1].alt_s, digits[1].alt_t = ONE_ALT, ONE_ALT        # 一 -> 幺
+    digits[2].alt_s, digits[2].alt_t = TWO_ALTS[0], TWO_ALTS[1]  # 二 -> 两/兩
 
-    # symbols
-    positive_cn = CM(POSITIVE[0], POSITIVE[1], '+', lambda x: x)
-    negative_cn = CM(NEGATIVE[0], NEGATIVE[1], '-', lambda x: -x)
-    point_cn = CM(POINT[0], POINT[1], '.', lambda x,
-                  y: float(str(x) + '.' + str(y)))
-    # sil_cn = CM(SIL[0], SIL[1], '-', lambda x, y: float(str(x) + '-' + str(y)))
+    # 构建数学符号
+    positive_cn = CM(POSITIVE[0], POSITIVE[1], '+', lambda x: x)               # 正号
+    negative_cn = CM(NEGATIVE[0], NEGATIVE[1], '-', lambda x: -x)              # 负号
+    point_cn = CM(POINT[0], POINT[1], '.', lambda x, y: float(str(x) + '.' + str(y)))  # 小数点
+
+    # 组装完整的数字系统
     system = NumberSystem()
-    system.units = smaller_units + larger_units
-    system.digits = digits
-    system.math = MathSymbol(positive_cn, negative_cn, point_cn)
-    # system.symbols = OtherSymbol(sil_cn)
+    system.units = smaller_units + larger_units    # 所有数位单位
+    system.digits = digits                          # 所有数字字符
+    system.math = MathSymbol(positive_cn, negative_cn, point_cn)  # 数学符号
+
     return system
 
 
 def chn2num(chinese_string, numbering_type=NUMBERING_TYPES[1]):
+    """
+    将中文数字字符串转换为阿拉伯数字
+
+    例如："一万二千三百四十五" -> "12345"
+          "三点一四" -> "3.14"
+          "负二十" -> "-20"
+
+    参数:
+        chinese_string (str): 中文数字字符串
+        numbering_type (str): 数字系统类型，默认为 'mid'
+
+    返回:
+        str: 转换后的阿拉伯数字字符串
+    """
 
     def get_symbol(char, system):
+        """
+        在数字系统中查找字符对应的符号对象
+
+        参数:
+            char (str): 要查找的中文字符
+            system (NumberSystem): 数字系统
+
+        返回:
+            ChineseNumberUnit|ChineseNumberDigit|ChineseMath: 对应的符号对象，未找到则返回 None
+        """
+        # 先在数位单位中查找
         for u in system.units:
             if char in [u.traditional, u.simplified, u.big_s, u.big_t]:
                 return u
+        # 再在数字字符中查找（含替代写法）
         for d in system.digits:
             if char in [d.traditional, d.simplified, d.big_s, d.big_t, d.alt_s, d.alt_t]:
                 return d
+        # 最后在数学符号中查找
         for m in system.math:
             if char in [m.traditional, m.simplified]:
                 return m
 
     def string2symbols(chinese_string, system):
+        """
+        将中文数字字符串拆分为符号对象列表
+
+        分别处理整数部分和小数部分。
+
+        参数:
+            chinese_string (str): 中文数字字符串
+            system (NumberSystem): 数字系统
+
+        返回:
+            tuple: (整数部分符号列表, 小数部分符号列表)
+        """
         int_string, dec_string = chinese_string, ''
+        # 检查是否有小数点
         for p in [system.math.point.simplified, system.math.point.traditional]:
             if p in chinese_string:
                 int_string, dec_string = chinese_string.split(p)
                 break
+        # 将字符串转换为符号对象列表
         return [get_symbol(c, system) for c in int_string], \
                [get_symbol(c, system) for c in dec_string]
 
     def correct_symbols(integer_symbols, system):
         """
-        一百八 to 一百八十
-        一亿一千三百万 to 一亿 一千万 三百万
-        """
+        修正整数部分的符号序列
 
+        处理以下特殊情况：
+        1. "一百八" -> "一百八十"（末尾缺少零位单位）
+        2. "一亿一千三百万" -> "一亿 一千万 三百万"（合并重叠单位）
+
+        参数:
+            integer_symbols (list): 整数部分符号对象列表
+            system (NumberSystem): 数字系统
+
+        返回:
+            list: 修正后的符号对象列表
+        """
+        # 如果以数位单位开头（如"十二"），在前面补上"一"
         if integer_symbols and isinstance(integer_symbols[0], CNU):
             if integer_symbols[0].power == 1:
                 integer_symbols = [system.digits[1]] + integer_symbols
 
+        # 处理末尾缺少单位的情况：如果最后两个符号是"数字+单位"，则在末尾追加低一级的单位
+        # 例如："一百八"中"八"是数字，"百"是单位，需要追加"十"
         if len(integer_symbols) > 1:
             if isinstance(integer_symbols[-1], CND) and isinstance(integer_symbols[-2], CNU):
                 integer_symbols.append(
                     CNU(integer_symbols[-2].power - 1, None, None, None, None))
 
+        # 合并重叠的单位（如："三千"+"百万"->"三千万"）
         result = []
         unit_count = 0
         for s in integer_symbols:
@@ -623,6 +865,7 @@ def chn2num(chinese_string, numbering_type=NUMBERING_TYPES[1]):
             if unit_count == 1:
                 result.append(current_unit)
             elif unit_count > 1:
+                # 合并单位：将前一个较小单位的值加上当前单位的值
                 for i in range(len(result)):
                     if isinstance(result[-i - 1], CNU) and result[-i - 1].power < current_unit.power:
                         result[-i - 1] = CNU(result[-i - 1].power +
@@ -631,29 +874,41 @@ def chn2num(chinese_string, numbering_type=NUMBERING_TYPES[1]):
 
     def compute_value(integer_symbols):
         """
-        Compute the value.
-        When current unit is larger than previous unit, current unit * all previous units will be used as all previous units.
-        e.g. '两千万' = 2000 * 10000 not 2000 + 10000
+        计算整数部分的数值
+
+        当当前单位大于前一个单位时，当前单位会乘以前面所有单位的值。
+        例如："两千万" = 2 * 1000 * 10000 = 20000000，而非 2000 + 10000
+
+        参数:
+            integer_symbols (list): 修正后的整数部分符号列表
+
+        返回:
+            int: 计算得到的整数值
         """
         value = [0]
         last_power = 0
         for s in integer_symbols:
             if isinstance(s, CND):
+                # 数字符号：设置当前段的值
                 value[-1] = s.value
             elif isinstance(s, CNU):
+                # 单位符号：将当前段的值乘以 10^power
                 value[-1] *= pow(10, s.power)
                 if s.power > last_power:
+                    # 当前单位大于上一个单位时，之前所有段都乘以这个单位
                     value[:-1] = list(map(lambda v: v *
                                           pow(10, s.power), value[:-1]))
                     last_power = s.power
-                value.append(0)
+                value.append(0)  # 开始新段
         return sum(value)
 
+    # 主流程
     system = create_system(numbering_type)
     int_part, dec_part = string2symbols(chinese_string, system)
     int_part = correct_symbols(int_part, system)
     int_str = str(compute_value(int_part))
     dec_str = ''.join([str(d.value) for d in dec_part])
+    # 如果有小数部分，拼接整数和小数
     if dec_part:
         return '{0}.{1}'.format(int_str, dec_str)
     else:
@@ -663,31 +918,69 @@ def chn2num(chinese_string, numbering_type=NUMBERING_TYPES[1]):
 def num2chn(number_string, numbering_type=NUMBERING_TYPES[1], big=False,
             traditional=False, alt_zero=False, alt_one=False, alt_two=True,
             use_zeros=True, use_units=True):
+    """
+    将阿拉伯数字字符串转换为中文数字
+
+    例如："12345" -> "一万二千三百四十五"
+          "3.14" -> "三点一四"
+
+    参数:
+        number_string (str): 阿拉伯数字字符串
+        numbering_type (str): 数字系统类型，默认 'mid'
+        big (bool): 是否使用大写形式（财务用），默认 False
+        traditional (bool): 是否使用繁体字，默认 False
+        alt_zero (bool): 是否使用"〇"替代"零"，默认 False
+        alt_one (bool): 是否使用"幺"替代"一"，默认 False
+        alt_two (bool): 是否使用"两"替代"二"，默认 True
+        use_zeros (bool): 是否在中间补零，默认 True
+        use_units (bool): 是否使用数位单位，默认 True
+
+    返回:
+        str: 转换后的中文数字字符串
+    """
 
     def get_value(value_string, use_zeros=True):
+        """
+        递归构建数字的值表示
 
+        将数字字符串按位分解为数位和数字符号的序列。
+        例如："12345" -> [一, 万, 二千, 三百, 四十, 五]
+
+        参数:
+            value_string (str): 数字字符串
+            use_zeros (bool): 是否在中间位置补零
+
+        返回:
+            list: 符号对象列表
+        """
+        # 去除前导零
         striped_string = value_string.lstrip('0')
 
-        # record nothing if all zeros
+        # 如果全部是零，返回空列表
         if not striped_string:
             return []
 
-        # record one digits
+        # 如果只有一位数字
         elif len(striped_string) == 1:
             if use_zeros and len(value_string) != len(striped_string):
+                # 有前导零需要补"零"
                 return [system.digits[0], system.digits[int(striped_string)]]
             else:
                 return [system.digits[int(striped_string)]]
 
-        # recursively record multiple digits
+        # 递归处理多位数字
         else:
+            # 找到小于数字位数的最大的数位单位
             result_unit = next(u for u in reversed(
                 system.units) if u.power < len(striped_string))
+            # 分割为高位部分和低位部分
             result_string = value_string[:-result_unit.power]
             return get_value(result_string) + [result_unit] + get_value(striped_string[-result_unit.power:])
 
+    # 创建数字系统
     system = create_system(numbering_type)
 
+    # 分离整数部分和小数部分
     int_dec = number_string.split('.')
     if len(int_dec) == 1:
         int_string = int_dec[0]
@@ -699,14 +992,18 @@ def num2chn(number_string, numbering_type=NUMBERING_TYPES[1], big=False,
         raise ValueError(
             "invalid input num string with more than one dot: {}".format(number_string))
 
+    # 生成整数部分的符号序列
     if use_units and len(int_string) > 1:
         result_symbols = get_value(int_string)
     else:
         result_symbols = [system.digits[int(c)] for c in int_string]
+
+    # 生成小数部分的符号序列
     dec_symbols = [system.digits[int(c)] for c in dec_string]
     if dec_string:
         result_symbols += [system.math.point] + dec_symbols
 
+    # 智能使用"两"替代"二"
     if alt_two:
         liang = CND(2, system.digits[2].alt_s, system.digits[2].alt_t,
                     system.digits[2].big_s, system.digits[2].big_t)
@@ -715,11 +1012,12 @@ def num2chn(number_string, numbering_type=NUMBERING_TYPES[1], big=False,
                 next_symbol = result_symbols[i +
                                              1] if i < len(result_symbols) - 1 else None
                 previous_symbol = result_symbols[i - 1] if i > 0 else None
+                # 在量词前的"二"改为"两"（如"两个"而非"二个"）
                 if isinstance(next_symbol, CNU) and isinstance(previous_symbol, (CNU, type(None))):
                     if next_symbol.power != 1 and ((previous_symbol is None) or (previous_symbol.power != 1)):
                         result_symbols[i] = liang
 
-    # if big is True, '两' will not be used and `alt_two` has no impact on output
+    # 选择输出属性（简体/繁体、普通/大写）
     if big:
         attr_name = 'big_'
         if traditional:
@@ -732,24 +1030,26 @@ def num2chn(number_string, numbering_type=NUMBERING_TYPES[1], big=False,
         else:
             attr_name = 'simplified'
 
+    # 将符号序列转换为字符串
     result = ''.join([getattr(s, attr_name) for s in result_symbols])
 
-    # if not use_zeros:
-    #     result = result.strip(getattr(system.digits[0], attr_name))
-
+    # 可选地使用替代零写法
     if alt_zero:
         result = result.replace(
             getattr(system.digits[0], attr_name), system.digits[0].alt_s)
 
+    # 可选地使用替代一写法
     if alt_one:
         result = result.replace(
             getattr(system.digits[1], attr_name), system.digits[1].alt_s)
 
+    # 处理以"点"开头的情况（如".5" -> "零点五"）
     for i, p in enumerate(POINT):
         if result.startswith(p):
             return CHINESE_DIGIS[0] + result
 
-    # ^10, 11, .., 19
+    # 处理"一十"到"十九"的简写（去掉前面的"一"）
+    # 如"一十五" -> "十五"
     if len(result) >= 2 and result[1] in [SMALLER_CHINESE_NUMERING_UNITS_SIMPLIFIED[0],
                                           SMALLER_CHINESE_NUMERING_UNITS_TRADITIONAL[0]] and \
             result[0] in [CHINESE_DIGIS[1], BIG_CHINESE_DIGIS_SIMPLIFIED[1], BIG_CHINESE_DIGIS_TRADITIONAL[1]]:
@@ -758,67 +1058,112 @@ def num2chn(number_string, numbering_type=NUMBERING_TYPES[1], big=False,
     return result
 
 
-# ================================================================================ #
-#                          different types of rewriters
-# ================================================================================ #
+# ============================================================================ #
+# NSW（Non-Standard Word）规范化类
+# 每个类对应一种非标准写法的转换规则
+# ============================================================================ #
+
 class Cardinal:
     """
-    CARDINAL类
+    基数词转换类（CARDINAL）
+
+    用于普通数字的转换，如 "123" -> "一百二十三"
     """
 
     def __init__(self, cardinal=None, chntext=None):
+        """
+        初始化 Cardinal 实例
+
+        参数:
+            cardinal (str): 阿拉伯数字字符串
+            chntext (str): 中文数字字符串
+        """
         self.cardinal = cardinal
         self.chntext = chntext
 
     def chntext2cardinal(self):
+        """中文数字转阿拉伯数字：调用 chn2num"""
         return chn2num(self.chntext)
 
     def cardinal2chntext(self):
+        """阿拉伯数字转中文数字：调用 num2chn"""
         return num2chn(self.cardinal)
 
 
 class Digit:
     """
-    DIGIT类
+    数字编号转换类（DIGIT）
+
+    用于将长数字逐位读出（如电话号码、编号等），而非按数值转换。
+    例如："1234" -> "一二三四"（而非"一千二百三十四"）
     """
 
     def __init__(self, digit=None, chntext=None):
+        """
+        初始化 Digit 实例
+
+        参数:
+            digit (str): 数字字符串
+            chntext (str): 中文逐位数字字符串
+        """
         self.digit = digit
         self.chntext = chntext
 
-    # def chntext2digit(self):
-    #     return chn2num(self.chntext)
-
     def digit2chntext(self):
+        """
+        将数字逐位转换为中文（不使用单位，不使用"两"）
+
+        例如："1234" -> "一二三四"
+
+        返回:
+            str: 逐位转换的中文数字
+        """
         return num2chn(self.digit, alt_two=False, use_units=False)
 
 
 class TelePhone:
     """
-    TELEPHONE类
+    电话号码转换类（TELEPHONE）
+
+    将电话号码转换为中文读法，支持手机号和固定电话。
+    例如：
+      手机号："13800138000" -> "幺三八零零幺三八零零零"
+      固话："010-12345678" -> "零幺零幺二三四五六七八"
     """
 
     def __init__(self, telephone=None, raw_chntext=None, chntext=None):
+        """
+        初始化 TelePhone 实例
+
+        参数:
+            telephone (str): 电话号码字符串
+            raw_chntext (str): 包含间隔标记的原始中文文本
+            chntext (str): 最终中文文本
+        """
         self.telephone = telephone
         self.raw_chntext = raw_chntext
         self.chntext = chntext
 
-    # def chntext2telephone(self):
-    #     sil_parts = self.raw_chntext.split('<SIL>')
-    #     self.telephone = '-'.join([
-    #         str(chn2num(p)) for p in sil_parts
-    #     ])
-    #     return self.telephone
-
     def telephone2chntext(self, fixed=False):
+        """
+        将电话号码转换为中文读法
 
+        参数:
+            fixed (bool): 是否为固定电话（使用"-"分割，无间隔直接拼接）
+                          False 为手机号（使用空格分割，无间隔直接拼接）
+
+        返回:
+            str: 中文电话号码
+        """
         if fixed:
+            # 固定电话：按"-"分割后逐段转换，直接拼接
             sil_parts = self.telephone.split('-')
             self.raw_chntext = '<SIL>'.join([
                 num2chn(part, alt_two=False, use_units=False) for part in sil_parts
             ])
             self.chntext = self.raw_chntext.replace('<SIL>', '')
         else:
+            # 手机号：按空格分割（如果有）后逐段转换，直接拼接
             sp_parts = self.telephone.strip('+').split()
             self.raw_chntext = '<SP>'.join([
                 num2chn(part, alt_two=False, use_units=False) for part in sp_parts
@@ -829,71 +1174,91 @@ class TelePhone:
 
 class Fraction:
     """
-    FRACTION类
+    分数转换类（FRACTION）
+
+    将分数转换为中文读法。
+    例如："3/4" -> "四分之三"
     """
 
     def __init__(self, fraction=None, chntext=None):
+        """
+        初始化 Fraction 实例
+
+        参数:
+            fraction (str): 分数字符串（如 "3/4"）
+            chntext (str): 中文分数文本
+        """
         self.fraction = fraction
         self.chntext = chntext
 
     def chntext2fraction(self):
+        """中文分数转阿拉伯分数"""
         denominator, numerator = self.chntext.split('分之')
         return chn2num(numerator) + '/' + chn2num(denominator)
 
     def fraction2chntext(self):
+        """
+        阿拉伯分数转中文
+
+        返回:
+            str: 中文分数，如 "四分之三"
+        """
         numerator, denominator = self.fraction.split('/')
         return num2chn(denominator) + '分之' + num2chn(numerator)
 
 
 class Date:
     """
-    DATE类
+    日期转换类（DATE）
+
+    将日期字符串转换为中文读法。
+    例如："2024年1月15日" -> "二零二四年一月十五日"
     """
 
     def __init__(self, date=None, chntext=None):
+        """
+        初始化 Date 实例
+
+        参数:
+            date (str): 日期字符串
+            chntext (str): 中文日期文本
+        """
         self.date = date
         self.chntext = chntext
 
-    # def chntext2date(self):
-    #     chntext = self.chntext
-    #     try:
-    #         year, other = chntext.strip().split('年', maxsplit=1)
-    #         year = Digit(chntext=year).digit2chntext() + '年'
-    #     except ValueError:
-    #         other = chntext
-    #         year = ''
-    #     if other:
-    #         try:
-    #             month, day = other.strip().split('月', maxsplit=1)
-    #             month = Cardinal(chntext=month).chntext2cardinal() + '月'
-    #         except ValueError:
-    #             day = chntext
-    #             month = ''
-    #         if day:
-    #             day = Cardinal(chntext=day[:-1]).chntext2cardinal() + day[-1]
-    #     else:
-    #         month = ''
-    #         day = ''
-    #     date = year + month + day
-    #     self.date = date
-    #     return self.date
-
     def date2chntext(self):
+        """
+        将日期转换为中文读法
+
+        年份逐位转换（如"2024"->"二零二四"），月份和日期使用基数转换。
+        支持以下格式：
+          - 完整格式："2024年1月15日"
+          - 只带月日："1月15日"
+          - 只带日："15日"
+
+        返回:
+            str: 中文日期文本
+        """
         date = self.date
         try:
+            # 提取年份："2024年1月15日" -> year="2024", other="1月15日"
             year, other = date.strip().split('年', 1)
-            year = Digit(digit=year).digit2chntext() + '年'
+            year = Digit(digit=year).digit2chntext() + '年'  # 年份逐位转换
         except ValueError:
+            # 没有年份部分
             other = date
             year = ''
         if other:
             try:
+                # 提取月份："1月15日" -> month="1", day="15日"
                 month, day = other.strip().split('月', 1)
                 month = Cardinal(cardinal=month).cardinal2chntext() + '月'
             except ValueError:
+                # 没有月份部分
                 day = date
                 month = ''
             if day:
+                # 去除末尾的"日"或"号"，转换数字部分后再添上
                 day = Cardinal(cardinal=day[:-1]).cardinal2chntext() + day[-1]
         else:
             month = ''
@@ -905,22 +1270,37 @@ class Date:
 
 class Money:
     """
-    MONEY类
+    货币金额转换类（MONEY）
+
+    将货币金额转换为中文读法。
+    例如："123.45元" -> "一百二十三点四五元"
     """
 
     def __init__(self, money=None, chntext=None):
+        """
+        初始化 Money 实例
+
+        参数:
+            money (str): 货币金额字符串
+            chntext (str): 中文金额文本
+        """
         self.money = money
         self.chntext = chntext
 
-    # def chntext2money(self):
-    #     return self.money
-
     def money2chntext(self):
+        """
+        将货币金额中的数字部分转换为中文
+
+        返回:
+            str: 中文金额文本
+        """
         money = self.money
+        # 匹配金额中的数字部分（包括小数）
         pattern = re.compile(r'(\d+(\.\d+)?)')
         matchers = pattern.findall(money)
         if matchers:
             for matcher in matchers:
+                # 用中文数字替换阿拉伯数字
                 money = money.replace(matcher[0], Cardinal(
                     cardinal=matcher[0]).cardinal2chntext())
         self.chntext = money
@@ -929,162 +1309,263 @@ class Money:
 
 class Percentage:
     """
-    PERCENTAGE类
+    百分数转换类（PERCENTAGE）
+
+    将百分数转换为中文读法。
+    例如："50%" -> "百分之五十"
     """
 
     def __init__(self, percentage=None, chntext=None):
+        """
+        初始化 Percentage 实例
+
+        参数:
+            percentage (str): 百分数字符串
+            chntext (str): 中文百分数文本
+        """
         self.percentage = percentage
         self.chntext = chntext
 
     def chntext2percentage(self):
+        """中文百分数转阿拉伯百分数"""
         return chn2num(self.chntext.strip().strip('百分之')) + '%'
 
     def percentage2chntext(self):
+        """
+        阿拉伯百分数转中文
+
+        返回:
+            str: 中文百分数，如 "百分之五十"
+        """
         return '百分之' + num2chn(self.percentage.strip().strip('%'))
 
 
+# ============================================================================ #
+# NSW 规范化主函数
+# 按顺序应用各种规范化规则
+# ============================================================================ #
+
 def normalize_nsw(raw_text):
+    """
+    NSW（Non-Standard Word）规范化主函数
+
+    将文本中的非标准写法按以下顺序转换为标准中文读音格式：
+      1. 日期规范化
+      2. 货币金额规范化
+      3. 电话号码规范化（手机号 + 固话）
+      4. 分数规范化
+      5. 百分数规范化
+      6. 基数词+量词规范化
+      7. 长数字编号规范化
+      8. 一般基数词规范化
+      9. 特殊模式恢复（如 P2P, O2O 等）
+
+    参数:
+        raw_text (str): 原始文本
+
+    返回:
+        str: 规范化后的文本
+    """
+    # 在文本前后添加标记，方便正则匹配边界
     text = '^' + raw_text + '$'
 
-    # 规范化日期
+    # ---- 1. 规范化日期 ----
+    # 匹配格式：可选年份（以 0/8/9 或 19/20 开头）+ 月 + 日
     pattern = re.compile(
         r"\D+((([089]\d|(19|20)\d{2})年)?(\d{1,2}月(\d{1,2}[日号])?)?)")
     matchers = pattern.findall(text)
     if matchers:
-        # print('date')
         for matcher in matchers:
             text = text.replace(matcher[0], Date(
                 date=matcher[0]).date2chntext(), 1)
 
-    # 规范化金钱
+    # ---- 2. 规范化货币金额 ----
+    # 匹配格式：数字 + 货币单位（元/块/角/分等）
     pattern = re.compile(
         r"\D+((\d+(\.\d+)?)[多余几]?" + CURRENCY_UNITS + r"(\d" + CURRENCY_UNITS + r"?)?)")
     matchers = pattern.findall(text)
     if matchers:
-        # print('money')
         for matcher in matchers:
             text = text.replace(matcher[0], Money(
                 money=matcher[0]).money2chntext(), 1)
 
-    # 规范化固话/手机号码
-    # 手机
-    # http://www.jihaoba.com/news/show/13680
-    # 移动：139、138、137、136、135、134、159、158、157、150、151、152、188、187、182、183、184、178、198
-    # 联通：130、131、132、156、155、186、185、176
-    # 电信：133、153、189、180、181、177
+    # ---- 3. 规范化电话号码 ----
+    # 3.1 手机号码
+    # 匹配规则：+86 可选 + 1开头 + 第二位 3/8/5/7/9 等 + 8位数字
     pattern = re.compile(
         r"\D((\+?86 ?)?1([38]\d|5[0-35-9]|7[678]|9[89])\d{8})\D")
     matchers = pattern.findall(text)
     if matchers:
-        # print('telephone')
         for matcher in matchers:
             text = text.replace(matcher[0], TelePhone(
                 telephone=matcher[0]).telephone2chntext(), 1)
-    # 固话
+
+    # 3.2 固定电话
+    # 匹配规则：区号（可选）+ 7-8位号码
     pattern = re.compile(r"\D((0(10|2[1-3]|[3-9]\d{2})-?)?[1-9]\d{6,7})\D")
     matchers = pattern.findall(text)
     if matchers:
-        # print('fixed telephone')
         for matcher in matchers:
             text = text.replace(matcher[0], TelePhone(
                 telephone=matcher[0]).telephone2chntext(fixed=True), 1)
 
-    # 规范化分数
+    # ---- 4. 规范化分数 ----
+    # 匹配格式：数字/数字
     pattern = re.compile(r"(\d+/\d+)")
     matchers = pattern.findall(text)
     if matchers:
-        # print('fraction')
         for matcher in matchers:
             text = text.replace(matcher, Fraction(
                 fraction=matcher).fraction2chntext(), 1)
 
-    # 规范化百分数
+    # ---- 5. 规范化百分数 ----
+    # 先将全角百分号转换为半角
     text = text.replace('％', '%')
     pattern = re.compile(r"(\d+(\.\d+)?%)")
     matchers = pattern.findall(text)
     if matchers:
-        # print('percentage')
         for matcher in matchers:
             text = text.replace(matcher[0], Percentage(
                 percentage=matcher[0]).percentage2chntext(), 1)
 
-    # 规范化纯数+量词
+    # ---- 6. 规范化基数词+量词 ----
+    # 匹配格式：数字 + 量词（如"3个"、"5斤"）
     pattern = re.compile(r"(\d+(\.\d+)?)[多余几]?" + COM_QUANTIFIERS)
     matchers = pattern.findall(text)
     if matchers:
-        # print('cardinal+quantifier')
         for matcher in matchers:
             text = text.replace(matcher[0], Cardinal(
                 cardinal=matcher[0]).cardinal2chntext(), 1)
 
-    # 规范化数字编号
+    # ---- 7. 规范化长数字编号（4位以上） ----
+    # 长数字通常按位读出，而非按数值转换
     pattern = re.compile(r"(\d{4,32})")
     matchers = pattern.findall(text)
     if matchers:
-        # print('digit')
         for matcher in matchers:
             text = text.replace(matcher, Digit(
                 digit=matcher).digit2chntext(), 1)
 
-    # 规范化纯数
+    # ---- 8. 规范化一般基数词 ----
+    # 匹配剩余的所有数字（含小数）
     pattern = re.compile(r"(\d+(\.\d+)?)")
     matchers = pattern.findall(text)
     if matchers:
-        # print('cardinal')
         for matcher in matchers:
             text = text.replace(matcher[0], Cardinal(
                 cardinal=matcher[0]).cardinal2chntext(), 1)
 
-    # restore P2P, O2O, B2C, B2B etc
+    # ---- 9. 特殊模式恢复 ----
+    # 将 A二B 模式（如"P二P"）中的"二"恢复为"2"
+    # 这是为了处理前面数字转换时被误转的情况
     pattern = re.compile(r"(([a-zA-Z]+)二([a-zA-Z]+))")
     matchers = pattern.findall(text)
     if matchers:
-        # print('particular')
         for matcher in matchers:
             text = text.replace(matcher[0], matcher[1]+'2'+matcher[2], 1)
 
+    # 去除前后添加的边界标记并返回
     return text.lstrip('^').rstrip('$')
 
 
+# ============================================================================ #
+# 文本清理辅助函数
+# ============================================================================ #
+
 def remove_erhua(text):
     """
-    去除儿化音词中的儿:
-    他女儿在那边儿 -> 他女儿在那边
+    去除文本中的儿化音，但保留白名单中的合法"儿"字
+
+    儿化音在文字中写作"儿"，但在朗读时不应该读出。
+    例如："他女儿在那边儿" -> "他女儿在那边"
+    白名单中的词（如"儿童"、"儿子"等）不受影响。
+
+    参数:
+        text (str): 输入文本
+
+    返回:
+        str: 去除儿化音后的文本
     """
-
     new_str = ''
+    # 循环查找文本中的"儿"字
     while re.search('儿', text):
-        a = re.search('儿', text).span()
-        remove_er_flag = 0
+        a = re.search('儿', text).span()  # 找到"儿"的位置
+        remove_er_flag = 0  # 标记是否应该去除
 
+        # 检查该"儿"是否在白名单词中
         if ER_WHITELIST_PATTERN.search(text):
             b = ER_WHITELIST_PATTERN.search(text).span()
+            # 如果白名单词的起始位置 <= "儿"的位置，则保留
             if b[0] <= a[0]:
                 remove_er_flag = 1
 
         if remove_er_flag == 0:
+            # 不在白名单中，去除"儿"
             new_str = new_str + text[0:a[0]]
             text = text[a[1]:]
         else:
+            # 在白名单中，保留整个词
             new_str = new_str + text[0:b[1]]
             text = text[b[1]:]
 
+    # 拼接剩余文本
     text = new_str + text
     return text
 
 
 def remove_space(text):
+    """
+    智能移除空格但保留英文单词之间的空格
+
+    英文单词之间需要保留空格，但中文与中文之间不需要空格。
+    函数在英文/数字字符之间保留空格，其他情况移除。
+
+    参数:
+        text (str): 输入文本
+
+    返回:
+        str: 处理后的文本
+    """
     tokens = text.split()
     new = []
     for k, t in enumerate(tokens):
         if k != 0:
+            # 如果前一个 token 的最后一个字符和后一个 token 的第一个字符都是英文/数字，
+            # 则保留空格
             if IN_EN_CHARS.get(tokens[k-1][-1]) and IN_EN_CHARS.get(t[0]):
                 new.append(' ')
         new.append(t)
     return ''.join(new)
 
 
+# ============================================================================ #
+# 主规范化类：TextNorm
+# 提供统一的文本规范化接口，可通过参数配置各种规范化选项
+# ============================================================================ #
+
 class TextNorm:
+    """
+    中文文本规范化器
+
+    将原始文本进行一系列规范化处理，使其适合 TTS（文本转语音）系统使用。
+    支持多种处理选项的灵活组合。
+
+    处理流程：
+      1. 繁简体转换（可选）
+      2. 全角转半角（可选）
+      3. 大小写转换（可选）
+      4. 去除填充词（如"呃"、"啊"）（可选）
+      5. 去除儿化音（可选）
+      6. NSW 规范化（数字、日期、货币等转中文读音）
+      7. 非法字符检查（可选）
+      8. 智能空格处理（可选）
+
+    使用示例：
+      >>> normalizer = TextNorm(to_banjiao=True, remove_erhua=True)
+      >>> result = normalizer("2024年1月15日，花费123.45元买了3个苹果")
+      "二零二四年一月十五日，花费一百二十三点四五元买了三个苹果"
+    """
+
     def __init__(self,
                  to_banjiao: bool = False,
                  to_upper: bool = False,
@@ -1095,6 +1576,22 @@ class TextNorm:
                  remove_space: bool = False,
                  cc_mode: str = '',
                  ):
+        """
+        初始化 TextNorm 实例
+
+        参数:
+            to_banjiao (bool): 是否将全角字符转换为半角字符
+            to_upper (bool): 是否将英文字母转为大写
+            to_lower (bool): 是否将英文字母转为小写
+            remove_fillers (bool): 是否去除填充词（"呃"、"啊"）
+            remove_erhua (bool): 是否去除儿化音
+            check_chars (bool): 是否检查非法字符（发现非法字符返回空字符串）
+            remove_space (bool): 是否智能处理空格
+            cc_mode (str): 繁简体转换模式
+                '' - 不转换
+                't2s' - 繁体转简体
+                's2t' - 简体转繁体
+        """
         self.to_banjiao = to_banjiao
         self.to_upper = to_upper
         self.to_lower = to_lower
@@ -1103,83 +1600,114 @@ class TextNorm:
         self.check_chars = check_chars
         self.remove_space = remove_space
 
+        # 初始化 OpenCC（繁简体转换引擎）
         self.cc = None
         if cc_mode:
             from opencc import OpenCC  # Open Chinese Convert: pip install opencc
             self.cc = OpenCC(cc_mode)
 
     def __call__(self, text):
+        """
+        规范化文本的主入口
+
+        按预定义的顺序应用所有启用的规范化处理。
+
+        参数:
+            text (str): 原始文本
+
+        返回:
+            str: 规范化后的文本，如果包含非法字符且 check_chars=True 则返回空字符串
+        """
+        # 1. 繁简体转换
         if self.cc:
             text = self.cc.convert(text)
 
+        # 2. 全角转半角
         if self.to_banjiao:
             text = text.translate(QJ2BJ_TRANSFORM)
 
+        # 3. 转大写
         if self.to_upper:
             text = text.upper()
 
+        # 4. 转小写
         if self.to_lower:
             text = text.lower()
 
+        # 5. 去除填充词（"呃"、"啊"）
         if self.remove_fillers:
             for c in FILLER_CHARS:
                 text = text.replace(c, '')
 
+        # 6. 去除儿化音
         if self.remove_erhua:
             text = remove_erhua(text)
 
+        # 7. NSW 规范化（数字、日期、货币等）
         text = normalize_nsw(text)
 
+        # 8. 非法字符检查（可选）
+        # 注意：标点转换被注释掉，因为某些 TTS 系统需要保留标点以控制停顿
         # text = text.translate(PUNCS_TRANSFORM)
-
         if self.check_chars:
             for c in text:
                 if not IN_VALID_CHARS.get(c):
                     logger.warning(f'illegal char {c} in: {text}')
                     return ''
 
+        # 9. 智能空格处理
         if self.remove_space:
             text = remove_space(text)
 
         return text
 
 
+# ============================================================================ #
+# 命令行入口
+# 支持多种输入格式：纯文本（txt）、Kaldi 存档格式（ark）、TSV 格式
+# ============================================================================ #
+
 if __name__ == '__main__':
-    p = argparse.ArgumentParser()
+    # 创建命令行参数解析器
+    p = argparse.ArgumentParser(description='中文文本规范化工具')
 
-    # normalizer options
+    # ---- 规范化选项 ----
     p.add_argument('--to_banjiao', action='store_true',
-                   help='convert quanjiao chars to banjiao')
+                   help='将全角字符转换为半角字符')
     p.add_argument('--to_upper', action='store_true',
-                   help='convert to upper case')
+                   help='将英文字母转换为大写')
     p.add_argument('--to_lower', action='store_true',
-                   help='convert to lower case')
+                   help='将英文字母转换为小写')
     p.add_argument('--remove_fillers', action='store_true',
-                   help='remove filler chars such as "呃, 啊"')
+                   help='去除填充词，如"呃, 啊"')
     p.add_argument('--remove_erhua', action='store_true',
-                   help='remove erhua chars such as "他女儿在那边儿 -> 他女儿在那边"')
+                   help='去除儿化音，如"他女儿在那边儿 -> 他女儿在那边"')
     p.add_argument('--check_chars', action='store_true',
-                   help='skip sentences containing illegal chars')
+                   help='检测非法字符，包含非法字符的句子将返回空字符串')
     p.add_argument('--remove_space', action='store_true',
-                   help='remove whitespace')
+                   help='智能处理空格（保留英文单词间空格）')
     p.add_argument('--cc_mode', choices=['', 't2s', 's2t'],
-                   default='', help='convert between traditional to simplified')
+                   default='', help='繁简体转换模式：t2s（繁体转简体）或 s2t（简体转繁体）')
 
-    # I/O options
+    # ---- 输入输出选项 ----
     p.add_argument('--log_interval', type=int, default=10000,
-                   help='log interval in number of processed lines')
+                   help='日志输出间隔（处理行数）')
     p.add_argument('--has_key', action='store_true',
-                   help="will be deprecated, set --format ark instead")
+                   help="已废弃，请使用 --format ark 代替")
     p.add_argument('--format', type=str,
-                   choices=['txt', 'ark', 'tsv'], default='txt', help='input format')
-    p.add_argument('ifile', help='input filename, assume utf-8 encoding')
-    p.add_argument('ofile', help='output filename')
+                   choices=['txt', 'ark', 'tsv'], default='txt',
+                   help='输入格式：txt（纯文本）、ark（Kaldi 格式）、tsv（带 TEXT 列的表格）')
+    p.add_argument('ifile', help='输入文件路径（UTF-8 编码）')
+    p.add_argument('ofile', help='输出文件路径')
 
+    # 解析命令行参数
     args = p.parse_args()
 
+    # 兼容旧的 --has_key 选项
     if args.has_key:
         args.format = 'ark'
 
+    # 创建规范化器实例
     normalizer = TextNorm(
         to_banjiao=args.to_banjiao,
         to_upper=args.to_upper,
@@ -1191,14 +1719,19 @@ if __name__ == '__main__':
         cc_mode=args.cc_mode,
     )
 
-    ndone = 0
+    ndone = 0  # 已处理行数计数器
+    # 打开输入文件和输出文件
     with open(args.ifile, 'r', encoding='utf8') as istream, open(args.ofile, 'w+', encoding='utf8') as ostream:
         if args.format == 'tsv':
+            # ---- TSV 格式处理 ----
+            # TSV 是制表符分隔的表格格式，需要处理包含 "TEXT" 列的文件
             reader = csv.DictReader(istream, delimiter='\t')
             if 'TEXT' not in reader.fieldnames:
                 raise ValueError(f"输入 TSV 文件缺少 'TEXT' 列，实际列名: {reader.fieldnames}")
+            # 输出表头
             print('\t'.join(reader.fieldnames), file=ostream)
 
+            # 逐行处理
             for item in reader:
                 text = item['TEXT']
 
@@ -1206,27 +1739,33 @@ if __name__ == '__main__':
                     text = normalizer(text)
 
                 if text:
+                    # 规范化成功，更新该行的 TEXT 列并输出
                     item['TEXT'] = text
                     print('\t'.join([item[f]
                           for f in reader.fieldnames]), file=ostream)
 
                 ndone += 1
+                # 按日志间隔输出进度
                 if ndone % args.log_interval == 0:
                     print(f'text norm: {ndone} lines done.',
                           file=sys.stderr, flush=True)
         else:
+            # ---- TXT/ARK 格式处理 ----
             for l in istream:
                 key, text = '', ''
-                if args.format == 'ark':  # KALDI archive, line format: "key text"
+                if args.format == 'ark':
+                    # KALDI 存档格式：每行格式为 "key text"
                     cols = l.strip().split(maxsplit=1)
                     key, text = cols[0], cols[1] if len(cols) == 2 else ''
                 else:
+                    # 纯文本格式：每行就是文本内容
                     text = l.strip()
 
                 if text:
                     text = normalizer(text)
 
                 if text:
+                    # 输出结果
                     if args.format == 'ark':
                         print(key + '\t' + text, file=ostream)
                     else:
@@ -1236,5 +1775,7 @@ if __name__ == '__main__':
                 if ndone % args.log_interval == 0:
                     print(f'text norm: {ndone} lines done.',
                           file=sys.stderr, flush=True)
+
+    # 输出最终统计
     print(f'text norm: {ndone} lines done in total.',
           file=sys.stderr, flush=True)

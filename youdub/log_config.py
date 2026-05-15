@@ -1,77 +1,198 @@
-import sys
-import os
-import threading
-from collections import deque
-from loguru import logger
+# ============================================================================
+# 日志系统配置模块 (log_config.py)
+# 功能：
+#   - 使用 loguru 库配置三路日志输出（控制台、文件、内存缓冲区）
+#   - 提供环形内存缓冲区，供 UI 实时获取最新日志内容
+#   - 线程安全的初始化和缓冲区操作
+# ============================================================================
 
-from .config import PROJECT_ROOT
+# ---------------------------------------------------------------------------
+# 标准库导入
+# ---------------------------------------------------------------------------
+import sys      # sys.stderr 控制台输出
+import os       # 路径操作
+import threading  # 线程锁，保证缓冲区操作的线程安全
+from collections import deque  # 双端队列，用作环形缓冲区（固定最大长度）
 
+# ---------------------------------------------------------------------------
+# 第三方库导入
+# ---------------------------------------------------------------------------
+from loguru import logger  # loguru 结构化日志库，比标准 logging 更简洁易用
+
+# ---------------------------------------------------------------------------
+# 项目内部模块导入
+# ---------------------------------------------------------------------------
+from .config import PROJECT_ROOT  # 项目根目录，用于确定日志文件路径
+
+
+# ============================================================================
+# 日志文件路径与格式常量
+# ============================================================================
+
+# 日志文件路径：项目根目录下的 youdub.log
 LOG_FILE = PROJECT_ROOT / "youdub.log"
 
-FORMAT_FILE = "<green>{time:YYYY-MM-DD HH:mm:ss.SSS}</green> | <level>{level: <8}</level> | <cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> - <level>{message}</level>"
-FORMAT_CONSOLE = "<green>{time:HH:mm:ss.SSS}</green> | <level>{level: <8}</level> | <cyan>{name}</cyan>:<cyan>{line}</cyan> - <level>{message}</level>"
+# 文件日志格式（含完整日期时间）
+FORMAT_FILE = (
+    "<green>{time:YYYY-MM-DD HH:mm:ss.SSS}</green> | "  # 时间戳（含毫秒）
+    "<level>{level: <8}</level> | "                      # 日志级别（左对齐，宽度8）
+    "<cyan>{name}</cyan>:<cyan>{function}</cyan>:"       # 模块名:函数名
+    "<cyan>{line}</cyan> - "                             # 行号
+    "<level>{message}</level>"                            # 日志消息
+)
 
+# 控制台日志格式（短时间，不含日期，节省控制台空间）
+FORMAT_CONSOLE = (
+    "<green>{time:HH:mm:ss.SSS}</green> | "              # 短时间（不含日期）
+    "<level>{level: <8}</level> | "                      # 日志级别
+    "<cyan>{name}</cyan>:<cyan>{line}</cyan> - "         # 模块名:行号（不含函数名）
+    "<level>{message}</level>"                            # 日志消息
+)
+
+
+# ============================================================================
+# 环形日志缓冲区（线程安全）
+# ============================================================================
+
+# 内存环形缓冲区，最多保留 1000 条日志记录
+# 用于 UI 实时获取最近日志，避免频繁读文件
 _log_buffer = deque(maxlen=1000)
+
+# 缓冲区操作锁，保证多线程写入时不会混乱
 _buffer_lock = threading.Lock()
 
-_INITIALIZED = False
-_init_lock = threading.Lock()
+# ============================================================================
+# 初始化状态（确保 init_logging 只执行一次）
+# ============================================================================
 
+_INITIALIZED = False      # 是否已初始化
+_init_lock = threading.Lock()  # 初始化锁
+
+
+# ============================================================================
+# 日志缓冲区回调函数
+# ============================================================================
 
 def _buffer_sink(message):
+    """
+    loguru 自定义 sink（日志接收器），将日志记录写入内存环形缓冲区。
+
+    作为 loguru 的 sink，此函数的参数 message 是 loguru 的 Message 对象，
+    包含完整的日志记录（时间、级别、模块名、行号、消息等）。
+
+    每条日志按固定格式格式化为字符串后加入环形缓冲区。
+    由于 deque(maxlen=1000) 的特性，超过 1000 条时会自动丢弃最旧的记录。
+
+    Args:
+        message: loguru.Message 对象，包含日志记录的所有元数据
+    """
+    # 从 loguru 记录中提取各个字段
     record = message.record
+    # 自定义格式化：短时间（不含毫秒尾部冗余）+ 级别 + 模块:行号 + 消息
     formatted = (
-        f"{record['time'].strftime('%H:%M:%S.%f')[:-3]} | "
-        f"{str(record['level']): <8} | "
-        f"{record['name']}:{record['line']} - "
-        f"{record['message']}"
+        f"{record['time'].strftime('%H:%M:%S.%f')[:-3]} | "  # 时间戳 HH:MM:SS.mmm
+        f"{str(record['level']): <8} | "                     # 日志级别（左对齐）
+        f"{record['name']}:{record['line']} - "              # 模块名:行号
+        f"{record['message']}"                                # 日志消息正文
     )
+    # 线程安全地追加到环形缓冲区
     with _buffer_lock:
         _log_buffer.append(formatted)
 
 
-def init_logging():
-    global _INITIALIZED
-    with _init_lock:
-        if _INITIALIZED:
-            return
-        _INITIALIZED = True
+# ============================================================================
+# 日志系统初始化
+# ============================================================================
 
+def init_logging():
+    """
+    初始化日志系统（三路输出）。
+
+    本函数是幂等的：多次调用只有第一次会生效（通过 _INITIALIZED 标志控制）。
+    线程安全：使用 _init_lock 保证并发安全。
+
+    日志输出目标：
+    1. 控制台（stderr）：短时间格式，带颜色，DEBUG 级别及以上
+    2. 文件（youdub.log）：完整时间格式，自动轮转（10MB），DEBUG 级别及以上
+    3. 内存缓冲区：INFO 级别及以上，最多 1000 条，供 UI 实时读取
+
+    使用说明：
+        在程序入口处调用一次即可，之后的日志通过 loguru.logger 输出。
+    """
+    global _INITIALIZED  # 需要修改全局标志
+
+    # ---- 双重检查锁定的初始化保护 ----
+    with _init_lock:     # 获取线程锁
+        if _INITIALIZED:  # 如果已经初始化，直接返回
+            return
+        _INITIALIZED = True  # 标记为已初始化
+
+    # ---- 清除 loguru 默认的 stderr sink ----
+    # loguru 在导入时会自动添加一个默认 sink，需要先移除
     logger.remove()
 
+    # ---- 第一路：控制台输出 ----
     logger.add(
-        sys.stderr,
-        format=FORMAT_CONSOLE,
-        level="DEBUG",
-        colorize=True,
+        sys.stderr,              # 输出到标准错误
+        format=FORMAT_CONSOLE,   # 短时间格式
+        level="DEBUG",           # DEBUG 级别及以上都输出
+        colorize=True,           # 启用颜色高亮
     )
 
+    # ---- 第二路：文件输出 ----
     logger.add(
-        LOG_FILE,
-        format=FORMAT_FILE,
-        level="DEBUG",
-        rotation="10 MB",
-        encoding="utf-8",
+        LOG_FILE,                # 输出文件路径
+        format=FORMAT_FILE,      # 完整时间格式
+        level="DEBUG",           # DEBUG 级别及以上都输出
+        rotation="10 MB",        # 文件达到 10MB 时自动轮转（备份旧文件，新建文件）
+        encoding="utf-8",        # 编码 UTF-8
     )
 
+    # ---- 第三路：内存环形缓冲区 ----
     logger.add(
-        _buffer_sink,
-        level="INFO",
+        _buffer_sink,            # 自定义 sink 函数
+        level="INFO",            # 只缓存 INFO 级别及以上的记录
     )
 
+    # 输出初始化完成日志，验证日志系统工作正常
     logger.debug(f"日志系统初始化完成，日志文件: {LOG_FILE}")
 
 
+# ============================================================================
+# 日志缓冲区读取接口
+# ============================================================================
+
 def get_log_buffer(clear=True):
-    with _buffer_lock:
-        if not _log_buffer:
+    """
+    获取并可选地清除内存日志缓冲区内容。
+
+    函数会将缓冲区中的所有日志行拼接为一个字符串，每行用换行符分隔。
+    注意：日志是按时间顺序存储的（最旧的在最前面）。
+
+    Args:
+        clear: 是否在读取后清除缓冲区（默认 True）
+               设为 False 可在不丢失日志的情况下查看当前内容
+
+    Returns:
+        str: 拼接后的日志字符串，每行一条日志记录
+             如果缓冲区为空，返回空字符串 ""
+    """
+    with _buffer_lock:           # 线程安全地访问缓冲区
+        if not _log_buffer:       # 缓冲区为空
             return ""
-        lines = list(_log_buffer)
+        lines = list(_log_buffer)  # 复制当前所有日志行
         if clear:
-            _log_buffer.clear()
+            _log_buffer.clear()    # 如果指定清除，清空缓冲区
+    # 用换行符拼接所有日志行
     return "\n".join(lines)
 
 
 def clear_log_buffer():
+    """
+    清空内存日志缓冲区（线程安全）。
+
+    通常在开始新的处理任务时调用，避免新旧日志混淆。
+    无返回值。
+    """
     with _buffer_lock:
         _log_buffer.clear()
