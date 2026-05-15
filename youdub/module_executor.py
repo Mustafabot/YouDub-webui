@@ -20,7 +20,7 @@ import time     # 重试间隔休眠
 from loguru import logger  # 结构化日志输出
 # 从注册表导入模块元数据查询和依赖解析函数
 from .module_registry import (
-    get_module, is_module_completed, resolve_dependencies,
+    get_module, is_module_completed,
     get_available_modules, get_module_missing_config,
     get_input_file_producer
 )
@@ -34,9 +34,13 @@ def build_execution_plan(selected_modules):
     """
     根据用户选择的模块构建执行计划。
 
-    此函数仅做拓扑排序，不自动添加缺失的上游依赖（与 resolve_dependencies 不同）。
+    此函数仅做拓扑排序，不自动添加缺失的上游依赖。
     如果 selected_modules 中没有包含某个模块的上游依赖，该上游不会自动补全。
     这允许用户精确控制执行范围（例如只运行翻译和 TTS，不重新下载和分离）。
+
+    注意：未选中的上游依赖可能意味着输入文件缺失，ModuleExecutor.execute()
+    会在运行时检测并报告，或触发兜底逻辑（如 video_synthesis 缺少 TTS 音频时
+    自动使用原音轨）。
 
     Args:
         selected_modules: 用户选择的模块 ID 列表（可能不完整）
@@ -47,9 +51,10 @@ def build_execution_plan(selected_modules):
     if not selected_modules:
         return []
 
-    # resolve_dependencies 在这里仅作排序，其自动补全效果
-    # 由调用方传入的模块列表决定
-    ordered = resolve_dependencies(selected_modules)
+    # 使用 get_execution_order 进行纯拓扑排序，不自动补全上游依赖
+    # get_execution_order 仅对传入的模块集合排序，不添加集合外的模块
+    from .module_registry import get_execution_order
+    ordered = get_execution_order(selected_modules)
     return ordered
 
 
