@@ -24,18 +24,58 @@ def _log_cuda_memory(logger_func=logger.info):
     logger_func(f'CUDA 显存: 已分配={allocated:.2f}GB, 已预留={reserved:.2f}GB, 空闲={free:.2f}GB, 总计={total:.2f}GB')
 
 
+_MODEL_VRAM_ESTIMATES = {
+    'large-v3': 6.0, 'large-v2': 6.0, 'large': 6.0,
+    'medium': 4.0, 'small': 2.0, 'base': 1.0, 'tiny': 0.5,
+    'align': 1.5, 'diarize': 1.5,
+}
+
+
+def _get_free_vram_gb():
+    """获取当前空闲 GPU 显存（GB），无 GPU 返回无穷大"""
+    if not torch.cuda.is_available():
+        return float('inf')
+    allocated = torch.cuda.memory_allocated() / 1024**3
+    total = torch.cuda.get_device_properties(0).total_memory / 1024**3
+    return total - allocated
+
+
 def _get_default_batch_size():
+    """根据 GPU 显存自动选择保守的批处理大小，预留安全余量避免 OOM"""
     if not torch.cuda.is_available():
         return 1
     total_vram_gb = torch.cuda.get_device_properties(0).total_memory / 1024**3
+    # 保守估算：实际峰值内存 = 模型 + 对齐 + 批处理数据，留 30% 余量
     if total_vram_gb >= 24:
-        return 32
-    elif total_vram_gb >= 16:
         return 16
-    elif total_vram_gb >= 8:
+    elif total_vram_gb >= 16:
         return 8
-    else:
+    elif total_vram_gb >= 8:
         return 4
+    else:
+        return 1
+
+
+def _check_vram_before_load(model_name, device='cuda'):
+    """加载模型前主动检查显存，不足时返回 (False, 建议消息) 避免进程被系统 OOM-kill"""
+    if device == 'cpu' or not torch.cuda.is_available():
+        return True, None
+    estimated = _MODEL_VRAM_ESTIMATES.get(model_name, 4.0)
+    free = _get_free_vram_gb()
+    total = torch.cuda.get_device_properties(0).total_memory / 1024**3
+    if free < estimated * 0.7:
+        return False, (
+            f"GPU 显存不足以加载 {model_name} 模型（约需 {estimated:.1f}GB，"
+            f"当前空闲 {free:.1f}GB / 总计 {total:.1f}GB）。"
+            f"建议：选择更小的模型（如 medium/small/tiny）或切换为 CPU 模式。"
+        )
+    return True, None
+
+
+def _is_oom_error(e):
+    """判断异常是否由 CUDA/系统 OOM 导致"""
+    msg = str(e).lower()
+    return 'out of memory' in msg or ('cuda' in msg and ('alloc' in msg or 'oom' in msg))
 
 
 @contextmanager
@@ -193,17 +233,17 @@ def merge_segments(transcript, ending='!"\').:;?]}~'):
 
     return merged_transcription
 
-def transcribe_audio(folder, model_name: str = 'large', download_root='models/ASR/whisper', device='auto', batch_size=None, diarization=True,min_speakers=None, max_speakers=None):
+def transcribe_audio(folder, model_name: str = 'large', download_root='models/ASR/whisper', device='auto', batch_size=None, diarization=True, min_speakers=None, max_speakers=None):
     if batch_size is None:
         batch_size = _get_default_batch_size()
     if os.path.exists(os.path.join(folder, 'transcript.json')):
         logger.info(f'Transcript already exists in {folder}')
         return True
-    
+
     wav_path = os.path.join(folder, 'audio_vocals.wav')
     if not os.path.exists(wav_path):
         raise FileNotFoundError(f'音频文件不存在: {wav_path}，请确认音频分离步骤已正确执行')
-    
+
     ffmpeg_available, ffmpeg_msg = ensure_ffmpeg_available(auto_download=True)
     if not ffmpeg_available:
         raise RuntimeError(
@@ -219,27 +259,53 @@ def transcribe_audio(folder, model_name: str = 'large', download_root='models/AS
     if device == 'auto':
         device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
+    # 加载前主动检查显存，避免进程被系统 OOM-kill
+    ok, err_msg = _check_vram_before_load(model_name, device)
+    if not ok:
+        logger.warning(err_msg)
+
     try:
         load_whisper_model(model_name, download_root, device)
 
         with _ffmpeg_in_path():
             rec_result = whisper_model.transcribe(wav_path, batch_size=batch_size)
-        
+
+        # 转录完成后立即卸载 Whisper 模型（~6GB），为对齐步骤释放显存
+        try:
+            _unload_whisper_model()
+        except Exception as unload_err:
+            logger.warning(f"卸载 Whisper 模型时出错（非致命）: {unload_err}")
+
         if rec_result['language'] == 'nn':
             logger.warning(f'No language detected in {wav_path}')
             return False
-        
+
+        # 加载对齐模型前检查显存
+        ok, err_msg = _check_vram_before_load('align', device)
+        if not ok:
+            logger.warning(err_msg)
+
         load_align_model(rec_result['language'])
         with _ffmpeg_in_path():
             rec_result = whisperx.align(rec_result['segments'], align_model, align_metadata,
                                         wav_path, device, return_char_alignments=False)
-        
+
+        # 对齐完成后卸载对齐模型（~1.5GB），为说话者分离释放显存
+        try:
+            _unload_align_model()
+        except Exception as unload_err:
+            logger.warning(f"卸载对齐模型时出错（非致命）: {unload_err}")
+
         if diarization:
+            ok, err_msg = _check_vram_before_load('diarize', device)
+            if not ok:
+                logger.warning(err_msg)
+
             load_diarize_model(device)
             with _ffmpeg_in_path():
-                diarize_segments = diarize_model(wav_path,min_speakers=min_speakers, max_speakers=max_speakers)
+                diarize_segments = diarize_model(wav_path, min_speakers=min_speakers, max_speakers=max_speakers)
                 rec_result = whisperx.assign_word_speakers(diarize_segments, rec_result)
-            
+
         transcript = [{'start': segement['start'], 'end': segement['end'], 'text': segement['text'].strip(), 'speaker': segement.get('speaker', 'SPEAKER_00')} for segement in rec_result['segments']]
         transcript = merge_segments(transcript)
         with open(os.path.join(folder, 'transcript.json'), 'w', encoding='utf-8') as f:
@@ -247,7 +313,19 @@ def transcribe_audio(folder, model_name: str = 'large', download_root='models/AS
         logger.info(f'Transcribed {wav_path} successfully, and saved to {os.path.join(folder, "transcript.json")}')
         generate_speaker_audio(folder, transcript)
         return True
-    except Exception:
+    except Exception as e:
+        # 如果因 CUDA OOM 失败且 batch_size > 1，自动减半后重试一次
+        if _is_oom_error(e) and batch_size > 1:
+            new_batch_size = max(1, batch_size // 2)
+            logger.warning(
+                f"CUDA 显存不足（batch_size={batch_size}），"
+                f"自动降低至 batch_size={new_batch_size} 后重试..."
+            )
+            cleanup_whisperx()
+            return transcribe_audio(
+                folder, model_name, download_root, device,
+                new_batch_size, diarization, min_speakers, max_speakers
+            )
         cleanup_whisperx()
         raise
 
@@ -314,6 +392,46 @@ def transcribe_all_audio_under_folder(folder, model_name: str = 'large', downloa
         return summary
     finally:
         cleanup_whisperx()
+
+def _unload_whisper_model():
+    """转录完成后卸载 Whisper 模型，为对齐和说话者分离释放显存"""
+    global whisper_model
+    import gc
+    import torch
+
+    with _model_lock:
+        if whisper_model is not None:
+            del whisper_model
+            whisper_model = None
+
+    gc.collect()
+    if torch.cuda.is_available():
+        torch.cuda.synchronize()
+        torch.cuda.empty_cache()
+    logger.info('Whisper 模型已卸载，显存已释放给后续步骤')
+    _log_cuda_memory()
+
+
+def _unload_align_model():
+    """对齐完成后卸载对齐模型，为说话者分离释放显存"""
+    global align_model, language_code, align_metadata
+    import gc
+    import torch
+
+    with _model_lock:
+        if align_model is not None:
+            del align_model
+            align_model = None
+            language_code = None
+            align_metadata = None
+
+    gc.collect()
+    if torch.cuda.is_available():
+        torch.cuda.synchronize()
+        torch.cuda.empty_cache()
+    logger.info('对齐模型已卸载，显存已释放给后续步骤')
+    _log_cuda_memory()
+
 
 def cleanup_whisperx():
     """清理 WhisperX 相关模型，释放显存"""
