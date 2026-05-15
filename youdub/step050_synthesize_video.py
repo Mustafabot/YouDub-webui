@@ -2,6 +2,7 @@
 import json
 import os
 import subprocess
+import sys
 import time
 
 from loguru import logger
@@ -184,8 +185,7 @@ def synthesize_video(folder, subtitles=True, use_original_audio=False, speed_up=
     outline = int(round(font_size/8))
     video_speed_filter = f"setpts=PTS/{speed_up}"
     audio_speed_filter = f"atempo={speed_up}"
-    import platform
-    font_name = 'Microsoft YaHei' if platform.system() == 'Windows' else 'Arial'
+    font_name = 'Microsoft YaHei' if sys.platform.startswith('win') else 'Arial'
     subtitle_filter = f"subtitles=filename='{srt_path}':force_style='FontName={font_name},FontSize={font_size},PrimaryColour=&HFFFFFF,OutlineColour=&H000000,Outline={outline},WrapStyle=2'"
     
     audio_stream = '0:a' if use_original_audio else '1:a'

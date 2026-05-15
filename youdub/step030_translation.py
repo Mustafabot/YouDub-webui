@@ -362,7 +362,8 @@ def _translate(summary, transcript, target_language='简体中文'):
         text = line['text']
         # history = ''.join(full_translation[:-10])
 
-        translation = None
+        translation = ''
+        ok = False
         retry_message = 'Only translate the quoted sentence and give me the final translation.'
         for retry in range(30):
             messages = fixed_message + \
@@ -385,6 +386,7 @@ def _translate(summary, transcript, target_language='简体中文'):
                 if not success:
                     retry_message += translation
                     raise Exception('Invalid translation')
+                ok = True
                 break
             except Exception as e:
                 logger.error(e)
@@ -395,7 +397,7 @@ def _translate(summary, transcript, target_language='简体中文'):
                         api_key=get_config('OPENAI_API_KEY')
                     )
                 time.sleep(1)
-        if translation is None:
+        if not ok:
             raise RuntimeError(f'翻译行在 30 次重试后仍然失败: {text[:50]}')
         full_translation.append(translation)
         history.append({'role': 'user', 'content': f'Translate:"{text}"'})

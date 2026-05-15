@@ -118,7 +118,6 @@ def separate_audio(folder: str, model_name: str = "htdemucs_ft", device: str = '
     with _separator_lock:
         if separator is None:
             load_model(model_name, device, progress, shifts, segment)
-        local_sep = separator
     audio_path = os.path.join(folder, 'audio.wav')
     if not os.path.exists(audio_path):
         raise FileNotFoundError(f'音频文件不存在: {audio_path}，请确认步骤01已正确执行')

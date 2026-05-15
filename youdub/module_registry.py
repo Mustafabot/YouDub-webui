@@ -269,16 +269,15 @@ def resolve_dependencies(selected_modules):
     if not selected_modules:
         return []
     expanded = set(selected_modules)
-    changed = True
-    while changed:
-        changed = False
-        for mid in list(expanded):
-            module = get_module(mid)
-            if module:
-                for dep in module["dependencies"]:
-                    if dep not in expanded:
-                        expanded.add(dep)
-                        changed = True
+    queue = list(expanded)
+    while queue:
+        mid = queue.pop()
+        module = get_module(mid)
+        if module:
+            for dep in module["dependencies"]:
+                if dep not in expanded:
+                    expanded.add(dep)
+                    queue.append(dep)
     return get_execution_order(list(expanded))
 
 

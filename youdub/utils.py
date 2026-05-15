@@ -32,12 +32,7 @@ def save_wav(wav: np.ndarray, output_path: str, sample_rate=24000):
 
 def normalize_wav(wav_path: str) -> None:
     sample_rate, wav = wavfile.read(wav_path)
-    peak = np.max(np.abs(wav))
-    if peak < 1e-10:
-        wavfile.write(wav_path, sample_rate, np.zeros_like(wav, dtype=np.int16))
-        return
-    wav_norm = wav * (32767 / peak)
-    wavfile.write(wav_path, sample_rate, wav_norm.astype(np.int16))
+    save_wav(wav, wav_path, sample_rate)
 
 
 PIP_MIRRORS = [

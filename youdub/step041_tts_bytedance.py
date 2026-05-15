@@ -7,6 +7,7 @@ pip install requests
 import base64
 import json
 import os
+import threading
 import time
 import uuid
 import librosa
@@ -54,11 +55,15 @@ def get_request_json(voice_type='BV001_streaming'):
 
 embedding_model = None
 embedding_inference = None
+_embedding_lock = threading.Lock()
 
 def load_embedding_model():
     global embedding_model, embedding_inference
     if embedding_model is not None:
         return True
+    with _embedding_lock:
+        if embedding_model is not None:
+            return True
     
     local_files_only = get_hf_local_files_only()
     hf_token = get_config('HF_TOKEN')
