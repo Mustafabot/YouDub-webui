@@ -324,8 +324,15 @@ def process_video(
             # 步骤 3: 字幕翻译
             translate_all_transcript_under_folder(folder, target_language=translation_target_language)
 
-            # 步骤 4: TTS 语音合成
-            generate_all_wavs_under_folder(folder, force_bytedance=force_bytedance)
+            # 步骤 4: TTS 语音合成（仅在配置完整时执行）
+            if check_module_config_available("tts"):
+                generate_all_wavs_under_folder(folder, force_bytedance=force_bytedance)
+            else:
+                logger.warning(
+                    "TTS 未配置，跳过语音合成步骤。"
+                    "后续视频合成将使用原音轨。如需配音请在设置中配置 TTS"
+                )
+                use_original_audio = True
 
             # 步骤 5: 视频合成（画面 + 配音/原声 + 字幕）
             synthesize_all_video_under_folder(
