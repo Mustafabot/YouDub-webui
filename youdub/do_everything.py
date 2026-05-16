@@ -165,8 +165,20 @@ def process_folder_with_modules(folder, params, selected_modules=None, skip_comp
 
     # 构建执行计划：拓扑排序
     execution_plan = build_execution_plan(selected_modules)
+
+    # 过滤掉未正确配置的模块（如 TTS 未配 BYTEDANCE 或 IndexTTS 不可用）
+    available_ids = [m["id"] for m in get_available_modules()]
+    unavailable = [m for m in execution_plan if m not in available_ids]
+    if unavailable:
+        unavailable_names = [get_module(m)["name"] for m in unavailable if get_module(m)]
+        logger.warning(
+            f"以下模块因配置不完整被跳过: {', '.join(unavailable_names)}，"
+            f"请在设置页面补充相关配置"
+        )
+        execution_plan = [m for m in execution_plan if m in available_ids]
+
     if not execution_plan:
-        logger.warning("No valid modules to execute")
+        logger.warning("No valid modules to execute (all modules skipped due to missing configuration)")
         return True  # 空计划视为成功（没有需要执行的）
 
     # 验证执行计划：收集警告但不阻止执行
