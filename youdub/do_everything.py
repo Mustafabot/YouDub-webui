@@ -35,7 +35,9 @@ from .step000_video_downloader import (
 from .module_registry import (
     get_module,                   # 获取模块元数据
     get_module_ids,               # 获取所有模块 ID
-    is_module_completed           # 检查模块是否已完成
+    is_module_completed,          # 检查模块是否已完成
+    get_available_modules,        # 获取当前环境下可用的模块列表
+    check_module_config_available # 检查模块所需配置是否完整
 )
 # 模块执行器：执行计划构建、计划验证、默认执行器创建
 from .module_executor import (
